@@ -20,10 +20,13 @@ import (
 	"github.com/coder/websocket"
 )
 
-// chatView builds the chat screen for one channel. It shows the channel name
-// in a header, the message history as bubbles, and a composer pinned to the
-// bottom. onBack returns to the channel list.
-func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channelName string, onBack func()) fyne.CanvasObject {
+// chatView builds the chat screen for one channel: a header with the name and
+// a summary line, the history as bubbles, and a composer pinned to the bottom.
+//
+// It returns the content and a stop function. The stop function must be called
+// when the view is swapped for another channel, otherwise the WebSocket
+// goroutine keeps receiving into a view nobody is looking at any more.
+func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channelName, channelType string) (fyne.CanvasObject, func()) {
 	messagesBox := container.NewVBox()
 	banner := errorBannerWidget()
 
@@ -178,11 +181,16 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	sending.OnTapped = send
 	entry.OnSubmitted = func(string) { send() }
 
-	// Telegram uses a bare arrow rather than a labelled button.
-	backBtn := iconButton(theme.NavigateBackIcon(), func() {
-		cancelWS()
-		onBack()
-	})
+	// Telegram puts the channel name on one line and a quieter summary under
+	// it, with the search and menu actions on the right.
+	title := canvas.NewText(channelName, theme.ForegroundColor())
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	title.TextSize = theme.Size(theme.SizeNameSubHeadingText)
+
+	subtitle := canvas.NewText(channelTypeLabel(channelType), theme.PlaceHolderColor())
+	subtitle.TextSize = theme.Size(theme.SizeNameCaptionText)
+
+	heading := container.NewVBox(title, subtitle)
 
 	refreshBtn := iconButton(theme.ViewRefreshIcon(), func() {
 		banner.Clear()
@@ -197,10 +205,25 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 		prefs.apply()
 	})
 
-	header := headerBar(channelName, themeBtn, refreshBtn, backBtn)
+	header := container.NewPadded(container.NewBorder(nil, nil, heading,
+		container.NewHBox(themeBtn, refreshBtn), nil))
+
 	composer := container.NewBorder(nil, banner.wrap, nil, sending, container.NewPadded(entry))
 
-	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll))
+	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll)), cancelWS
+}
+
+// channelTypeLabel turns the raw type into the sentence Telegram shows under
+// the channel name.
+func channelTypeLabel(channelType string) string {
+	switch strings.ToLower(strings.TrimSpace(channelType)) {
+	case "p2p", "private", "pv", "dm":
+		return "Private conversation"
+	case "channel":
+		return "Broadcast channel"
+	default:
+		return "Group"
+	}
 }
 
 // scrollThreshold is how close to the end counts as "at the bottom", in

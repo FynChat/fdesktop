@@ -52,7 +52,8 @@ FCP lands — see [Roadmap](#roadmap).
   open instead of the login form.
 - **Session expiry** — a rejected token drops you back to the login screen
   once, instead of failing every action with a dialog.
-- **One window, view swapping** — `Login ⇄ Register → Channels → Chat`.
+- **One window, two panes** — the chat list stays put while the conversation
+  beside it changes, and the divider is draggable.
 - **Correct threading** — every HTTP call runs on a goroutine and every UI
   mutation goes through `fyne.Do`.
 - **Configurable backend URL** — point the app at any host with
@@ -69,24 +70,29 @@ FCP lands — see [Roadmap](#roadmap).
 
 ## Screens
 
+The app is one window split in two, the way Telegram Desktop is: the channel
+list on the left, the open conversation on the right. Picking a chat swaps only
+the pane beside the list, so you never navigate back to a list to change
+conversation. The divider is draggable.
+
 ```
-   ┌───────────┐        ┌──────────────┐        ┌─────────────┐
-   │   Login   │ <────► │  Register    │        │  Channels   │
-   │ email/pw  │        │ name/user/   │        │  ▸ general  │
-   └─────┬─────┘        │ email/pw     │        │  ▸ random   │
-         │              └──────┬───────┘        │  [+ New]    │
-         └──────────────────────┘               │  [ Logout]  │
-                     on success                 └──────┬──────┘
-                                                    │ click
-   ┌────────────────────────────────────────────────▼──────────┐
-   │ ‹ Back            # general                                  │
-   │─────────────────────────────────────────────────────────────│
-   │ ada: hello there                                           │
-   │ lin: hi!                                                   │
-   │─────────────────────────────────────────────────────────────│
-   │ [ Type a message...                    ] [ Send ]            │
-   └────────────────────────────────────────────────────────────┘
+┌──────────────────────┬────────────────────────────────────────┐
+│ +  Search channels 🎨🗑│  general                    🎨 ⟳      │
+├──────────────────────┤  Group                                    │
+│ (G) general      group│  ─────────────────────────────────────  │
+│ (D) design-team channel│              Yesterday                   │
+│ (A) ada          p2p │  (2) User #2            12:00            │
+│                      │      morning everyone — finally green   │
+│  ← open chat is      │  (3) User #3            09:00            │
+│    filled with the   │      does the channel list still 404?   │
+│    accent colour     │                  no — added yesterday   │
+│                      │  ─────────────────────────────────────  │
+│                      │  [ Message…                       ➤    │
+└──────────────────────┴────────────────────────────────────────┘
 ```
+
+Before signing in there is no list to show, so the auth screens take the whole
+window.
 
 ## Project layout
 
@@ -99,8 +105,9 @@ state-management library, just structs, fields and callbacks.
 | `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods |
 | `login.go` | `loginView(...)` — email/password form |
 | `register.go` | `registerView(...)` — name/username/email/password form |
-| `channels.go` | `channelsView(...)` — channel list, new-channel dialog, logout |
-| `chat.go` | `chatView(...)` — history, composer, WebSocket live messages |
+| `channels.go` | `sidebarView(...)` — the chat list column: search, rows, new channel |
+| `shell.go` | the two-pane window and the pane swap |
+| `chat.go` | `chatView(...)` — header, history as bubbles, composer |
 | `httpclient_test.go` | `httptest`-based tests for every HTTP method |
 | `session_test.go` | the session survives a restart and logout clears it |
 | `validate_test.go` | form validation rules |
@@ -112,7 +119,7 @@ state-management library, just structs, fields and callbacks.
 Navigation is done by passing callbacks. `main.go` owns the transitions:
 
 ```go
-Login ⇄ Register → Channels → Chat
+Login ⇄ Register → the two-pane window ⇄ Chat
 Chat --Back--> Channels --Logout--> Login
 ```
 

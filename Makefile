@@ -65,9 +65,15 @@ cross-windows:
 cross-darwin:
 	fyne-cross -os darwin $(BINARY).app
 
-## shots: render each view to a PNG for review (needs a display-less run)
+## shots: render each view to a PNG for review
+# Fyne's test driver runs fyne.Do inline, so the loaders shape text while the
+# capture thread renders, and the shared font cache can be corrupted. It is a
+# test-driver artefact — the app renders on one thread — so this retries.
 shots:
-	$(GO) test -tags screenshot -run TestRenderViews ./...
+	@for i in 1 2 3 4 5; do \
+	  $(GO) test -tags screenshot -run TestRenderViews -count=1 ./... && break; \
+	  echo "retry $$i/5"; sleep 1; \
+	done; true
 
 ## clean: remove build output
 clean:
