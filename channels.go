@@ -4,8 +4,54 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
+
+// channelRow holds the widgets of one list line: the container the List keeps,
+// plus the pieces inside it that update() has to reach.
+type channelRow struct {
+	container *fyne.Container
+	avatarBox *fyne.Container
+	labels    *widget.RichText
+}
+
+func newChannelRow() *channelRow {
+	// One RichText instead of two labels: a VBox stretches its children to
+	// fill the row height, which pushes the second line far below the first.
+	// A single object keeps the two lines tight.
+	labels := widget.NewRichText()
+
+	avatarBox := container.NewGridWrap(fyne.NewSquareSize(36), avatar("?", 36))
+
+	return &channelRow{
+		container: container.NewPadded(container.NewHBox(avatarBox, labels)),
+		avatarBox: avatarBox,
+		labels:    labels,
+	}
+}
+
+// update fills the row with one channel's data.
+func (r *channelRow) update(ch Channel) {
+	r.avatarBox.Objects[0] = avatar(ch.ChannelName, 36)
+	r.avatarBox.Refresh()
+
+	r.labels.Segments = []widget.RichTextSegment{
+		&widget.TextSegment{
+			Style: widget.RichTextStyleStrong,
+			Text:  ch.ChannelName,
+		},
+		&widget.TextSegment{
+			Style: widget.RichTextStyle{
+				SizeName:  theme.SizeNameCaptionText,
+				ColorName: theme.ColorNamePlaceHolder,
+				TextStyle: fyne.TextStyle{Italic: true},
+			},
+			Text: "\n" + ch.ChannelType,
+		},
+	}
+	r.labels.Refresh()
+}
 
 // channelsView builds the channel list screen. It loads channels from the
 // backend, lets the user create new channels, select one to open its chat,
@@ -14,12 +60,25 @@ import (
 func channelsView(client *HTTPClient, w fyne.Window, onChannelSelected func(channel Channel), onLogout func()) fyne.CanvasObject {
 	var channels []Channel
 
-	// Channel list: recreate/update a label per row.
+	// The row stays a plain *fyne.Container on purpose: the canvas walks
+	// children by type-asserting to that exact type, so a struct of our own
+	// that embeds one reports the right size but paints nothing. The widgets
+	// are therefore looked up by pointer instead of through nesting.
+	rows := map[*fyne.Container]*channelRow{}
+
 	list := widget.NewList(
 		func() int { return len(channels) },
-		func() fyne.CanvasObject { return widget.NewLabel("channel") },
+		func() fyne.CanvasObject {
+			row := newChannelRow()
+			rows[row.container] = row
+			return row.container
+		},
 		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(channels[i].ChannelName)
+			row, ok := rows[o.(*fyne.Container)]
+			if !ok {
+				return
+			}
+			row.update(channels[i])
 		},
 	)
 	list.OnSelected = func(id widget.ListItemID) {
@@ -45,12 +104,23 @@ func channelsView(client *HTTPClient, w fyne.Window, onChannelSelected func(chan
 	}
 	load()
 
-	// newChannelBtn opens a form dialog to create a channel, then reloads.
-	newChannelBtn := widget.NewButton("New Channel", func() {
+	// logoutBtn clears the auth token and returns to the login view.
+	logoutBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+		client.Logout()
+		onLogout()
+	})
+	logoutBtn.Importance = widget.LowImportance
+
+	// The two header actions are icons, not labelled buttons: the header is
+	// already a title, and icons keep the row short at any window width.
+	newChannelBtn := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
 		typeEntry := widget.NewEntry()
+		typeEntry.SetPlaceHolder("text")
 		nameEntry := widget.NewEntry()
+		nameEntry.SetPlaceHolder("general")
 		avatarEntry := widget.NewEntry()
-		dialog.ShowForm("New Channel", "Create", "Cancel", []*widget.FormItem{
+		avatarEntry.SetPlaceHolder("https://…")
+		dialog.ShowForm("New channel", "Create", "Cancel", []*widget.FormItem{
 			widget.NewFormItem("Type", typeEntry),
 			widget.NewFormItem("Name", nameEntry),
 			widget.NewFormItem("Avatar URL", avatarEntry),
@@ -70,16 +140,9 @@ func channelsView(client *HTTPClient, w fyne.Window, onChannelSelected func(chan
 			}()
 		}, w)
 	})
+	newChannelBtn.Importance = widget.LowImportance
 
-	// logoutBtn clears the auth token and returns to the login view.
-	logoutBtn := widget.NewButton("Logout", func() {
-		client.Token = ""
-		onLogout()
-	})
+	header := headerBar("Chats", newChannelBtn, logoutBtn)
 
-	return container.NewBorder(
-		container.NewVBox(widget.NewLabel("Channels"), container.NewHBox(newChannelBtn, logoutBtn)),
-		nil, nil, nil,
-		list,
-	)
+	return container.NewBorder(header, nil, nil, nil, container.NewPadded(list))
 }

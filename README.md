@@ -31,11 +31,11 @@ FCP lands — see [Roadmap](#roadmap).
 
 ## Status
 
-> **Pre-alpha.** The UI and all six API methods are implemented and the HTTP
-> layer is unit-tested, but the client is aligned with a backend that still
-> lacks the channel-list and message-history routes. See
-> [Backend requirements](#backend-requirements) before expecting a working
-> chat round-trip.
+> **Pre-alpha.** The UI and all six API methods are implemented and unit-tested,
+> and the client talks to `fynchat-backend` successfully: login, the channel
+> list, message history and sending all work against a live database. Live
+> message push needs a WebSocket the backend does not expose yet — see
+> [Backend requirements](#backend-requirements).
 
 ## Features
 
@@ -193,20 +193,19 @@ register and channel creation work as-is.
 
 | Route the client needs | Backend status | Change required |
 | --- | --- | --- |
-| `GET /api/channels` | ❌ missing | add a list handler returning channel rows including `id` |
-| `GET /api/channels/:id/messages` | ❌ missing | add a history handler returning message rows |
-| `POST /api/message/create/:channel_id` | ⚠️ registered without the param | `MessageHandler.Create` reads `c.Param("channel_id")`, so the route must be `api.POST("/message/create/:channel_id", messagesHandler.Create)` — as registered today it always 400s on an empty channel id |
+| `GET /api/channels` | ✅ implemented | – |
+| `GET /api/channels/:id/messages` | ✅ implemented | – |
+| `POST /api/message/create/:channel_id` | ✅ implemented | – |
 | `ws://…/ws` | ❌ missing | see [`docs/websockets.md`](docs/websockets.md) |
 | Port | ⚠️ `SERVER_PORT` defaults to `8000` | run with `FYNCHAT_API_URL=http://localhost:8000` |
 
-Also note, when you build the backend itself:
+The backend's module path also had to be corrected (`fynchat.com` vs
+`fynchat/...`), and `routes.Setup` was being called without the
+`messagesHandler` it requires. Both belong to the backend repo — this README
+only records them.
 
-- its `go.mod` declares `module fynchat.com` while the code imports
-  `fynchat/internal/...`, so it does not compile as committed;
-- `routes.Setup` takes a `messagesHandler` argument that `cmd/fynchat/main.go`
-  does not pass.
-
-Both belong to the backend repo — this README only records them.
+The client and the backend were verified end to end against a live database:
+login, channel list, message history and message send all decode correctly.
 
 ## WebSockets
 
@@ -265,14 +264,11 @@ Scratch output lands in `fyne-cross/tmp/` (git-ignored).
 
 ## Roadmap
 
-- [ ] Backend: add `GET /api/channels` and `GET /api/channels/:id/messages`,
-      and fix the `:channel_id` param on `POST /api/message/create` — see
-      [Backend requirements](#backend-requirements).
-- [ ] Implement the Hub described in `docs/websockets.md` in the backend.
+- [ ] Backend: implement the Hub described in `docs/websockets.md`.
 - [ ] Reconnect with exponential backoff + re-fetch after reconnect.
 - [ ] Refresh-token support (`/api/request` in the backend) so long sessions
       do not die on an expired JWT.
-- [ ] Persist the token so the app reopens on the channel list.
+- [x] Persist the token so the app reopens on the channel list.
 - [ ] Message grouping, avatars, timestamps and `channel_type` handling in the
       channel list.
 - [ ] `fynproto` (FCP) transport as the long-term replacement for REST + WS.

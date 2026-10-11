@@ -18,3 +18,5 @@
 .vscode/
 .DS_Store
 *.swp
+# Screenshot harness output
+shot-*.png
