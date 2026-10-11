@@ -1,100 +1,288 @@
-The Prompt
+<div align="center">
+  <img src="Icon.png" alt="FynChat logo" width="96" height="96">
 
-> See `docs/websockets.md` for the WebSocket (hub/client/broadcast) guide used
-> to add live message push to the chat view.
+  # FynChat Desktop
 
-    I'm building a desktop chat app with Fyne (fyne.io/fyne/v2) in Go. The backend is already running at http://localhost:8080. I need you to write the frontend code, one view at a time, in separate files.
+  A cross-platform desktop chat client for the FynChat platform, built with Go and [Fyne](https://fyne.io).
 
-    Backend API (already implemented):
+  `frontend` · Go 1.26 · [Fyne](https://fyne.io) v2.8 · MIT License
+</div>
 
-        POST /register — body: {"name": "...", "username": "...", "email": "...", "password": "..."} → returns {"access_token": "...", "user": {...}}
+---
 
-        POST /login — body: {"email": "...", "password": "..."} → returns {"access_token": "...", "user": {...}}
+## What this is
 
-        GET /channels — header: Authorization: Bearer <token> → returns [{"id": "uuid", "channel_name": "...", "channel_avatar": "..."}]
+**fdesktop** is the desktop client of the FynChat messenger. It is a single
+native window (not an Electron wrapper, not a browser) that talks to the
+FynChat backend over HTTP and WebSockets.
 
-        POST /channels — header: Authorization: Bearer <token> — body: {"channel_type": "...", "name": "...", "avatar_url": "..."} → returns {"channel_name": "...", "channel_avatar": "..."}
+This repository contains **only the GUI**. Accounts, channels, messages and
+persistence live in two sibling repositories.
 
-        GET /channels/{id}/messages — header: Authorization: Bearer <token> → returns [{"id": "uuid", "channel_id": "uuid", "sender_id": 1, "content": "...", "created_at": "..."}]
+| Repository | Role |
+| --- | --- |
+| **[FynChat/fynchat-backend](https://github.com/FynChat/fynchat-backend)** | Go + Gin REST API, JWT auth, PostgreSQL persistence |
+| **[FynChat/fynproto](https://github.com/FynChat/fynproto)** | FCP — binary real-time messaging protocol (codec, TCP transport, client/server examples) |
+| **FynChat/fdesktop** *(this repo)* | Fyne desktop UI, the HTTP client and the WebSocket view |
 
-        POST /channels/{id}/messages — header: Authorization: Bearer <token> — body: {"content": "..."} → returns the created message
+The desktop app talks plain REST + WebSocket to `fynchat-backend`.
+`fynproto` is the planned replacement for the HTTP/WebSocket transport once
+FCP lands — see [Roadmap](#roadmap).
 
-    What I want you to write:
+## Status
 
-    1. A httpClient package or file — an HTTPClient struct with a Token field and methods:
+> **Pre-alpha.** The UI and all six API methods are implemented and the HTTP
+> layer is unit-tested, but the client is aligned with a backend that still
+> lacks the channel-list and message-history routes. See
+> [Backend requirements](#backend-requirements) before expecting a working
+> chat round-trip.
 
-        Login(email, password string) (string, error) — returns the token
+## Features
 
-        Register(name, username, email, password string) (string, error) — returns the token
+- **Register / login** — email + password, JWT stored in the shared client.
+- **Channel list** — scrollable list, create a channel with a type, name and
+  avatar URL, refresh after creation.
+- **Chat view** — message history, send with the button or `Enter`, live
+  messages pushed over a WebSocket.
+- **Logout** — clears the token and returns to the login view.
+- **Single window, view swapping** — `Login ⇄ Register → Channels → Chat`.
+- **Correct threading** — every HTTP call runs on a goroutine and every UI
+  mutation goes through `fyne.Do`.
+- **Configurable backend URL** — point the app at any host with
+  `FYNCHAT_API_URL` instead of editing code.
 
-        ListChannels() ([]Channel, error)
+## Screens
 
-        CreateChannel(channelType, name, avatar string) (Channel, error)
+```
+   ┌───────────┐        ┌──────────────┐        ┌─────────────┐
+   │   Login   │ <────► │  Register    │        │  Channels   │
+   │ email/pw  │        │ name/user/   │        │  ▸ general  │
+   └─────┬─────┘        │ email/pw     │        │  ▸ random   │
+         │              └──────┬───────┘        │  [+ New]    │
+         └──────────────────────┘               │  [ Logout]  │
+                     on success                 └──────┬──────┘
+                                                    │ click
+   ┌────────────────────────────────────────────────▼──────────┐
+   │ ‹ Back            # general                                  │
+   │─────────────────────────────────────────────────────────────│
+   │ ada: hello there                                           │
+   │ lin: hi!                                                   │
+   │─────────────────────────────────────────────────────────────│
+   │ [ Type a message...                    ] [ Send ]            │
+   └────────────────────────────────────────────────────────────┘
+```
 
-        ListMessages(channelID string) ([]Message, error)
+## Project layout
 
-        SendMessage(channelID, content string) (Message, error)
+One file per view, as the project convention dictates — no framework, no
+state-management library, just structs, fields and callbacks.
 
-    Use http.NewRequest + http.Client.Do. Always set the Authorization: Bearer <token> header on authenticated requests. Handle the error from every call. Parse the JSON response into structs.
+| File | Contents |
+| --- | --- |
+| `main.go` | App + window bootstrap, shared `HTTPClient`, view wiring |
+| `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods |
+| `login.go` | `loginView(...)` — email/password form |
+| `register.go` | `registerView(...)` — name/username/email/password form |
+| `channels.go` | `channelsView(...)` — channel list, new-channel dialog, logout |
+| `chat.go` | `chatView(...)` — history, composer, WebSocket live messages |
+| `httpclient_test.go` | `httptest`-based tests for every HTTP method |
+| `docs/websockets.md` | Hub / client-pump / broadcast design doc (server-side) |
 
-    2. login.go — a Fyne view with:
+Navigation is done by passing callbacks. `main.go` owns the transitions:
 
-        Two entries: email, password (password hidden)
+```go
+Login ⇄ Register → Channels → Chat
+Chat --Back--> Channels --Logout--> Login
+```
 
-        One button: Login
+## Requirements
 
-        A link or button to switch to Register
+- **Go 1.26+** (see `go.mod`).
+- **A C toolchain** — Fyne is a cgo/OpenGL toolkit, so the GUI needs
+  development headers at build time.
 
-        On click: call HTTPClient.Login. On success, store the token and call a onLoginSuccess() callback. On failure, show dialog.ShowError.
+<details>
+<summary>Linux system packages</summary>
 
-    3. register.go — same, but with name, username, email, password fields.
+Fyne needs OpenGL and windowing headers. Without them `go build` fails with
+`pkg-config: executable file not found` or
+`fatal error: wayland-client-core.h: No such file or directory`.
 
-    4. channels.go — a Fyne view with:
+**Debian / Ubuntu**
 
-        A scrollable list of channels (widget.NewList or container.NewVScroll + widget.NewLabel per channel)
+```bash
+sudo apt install build-essential pkg-config libgl1-mesa-dev libwayland-dev libxkbcommon-dev xorg-dev
+```
 
-        A "New Channel" button that opens a dialog.ShowForm for channel_type, name, avatar_url
+**Fedora**
 
-        On load: call ListChannels. On error, show a dialog.
+```bash
+sudo dnf install gcc pkgconf-pkg-config mesa-libGL-devel wayland-devel libxkbcommon-devel libX11-devel libXcursor-devel libXrandr-devel libXinerama-devel libXi-devel
+```
 
-        On channel click: call an onChannelSelected(channelID) callback.
+**Arch**
 
-        A "Logout" button that clears the token and returns to login.
+```bash
+sudo pacman -S base-devel pkgconf mesa wayland libxkbcommon libx11 libxcursor libxrandr libxinerama libxi
+```
 
-    5. chat.go — a Fyne view with:
+</details>
 
-        Top: a label showing the channel name
+- **A running `fynchat-backend`** (see the repo link above). Without it the app
+  starts but every request fails with a connection error dialog.
 
-        Middle: a scrollable list of messages (container.NewVScroll + a widget.NewVBox container with message labels)
+## Getting started
 
-        Bottom: a widget.NewEntry for typing + a widget.NewButton for sending
+```bash
+git clone git@github.com:FynChat/fdesktop.git
+cd fdesktop
+go mod download
+go run .
+```
 
-        On load: call ListMessages. On submit: call SendMessage, then refresh the list.
+Build a binary instead:
 
-        A "Back" button that returns to the channel list.
+```bash
+go build -o fynchat .
+./fynchat
+```
 
-    6. main.go — a Fyne app that:
+The app needs a display (X11 or Wayland). On a headless machine you will get a
+GLFW error on startup — run it under `xvfb-run` if you only need a smoke test.
 
-        Creates a fyne.App and one window
+## Configuration
 
-        Holds the HTTPClient and current state (token, selected channel ID)
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `FYNCHAT_API_URL` | `http://localhost:8080` | Base URL of the backend. Also used to derive the WebSocket URL (`http` → `ws`). |
 
-        Switches between views: Login → Channels → Chat
+```bash
+FYNCHAT_API_URL=http://localhost:8000 go run .   # backend default port
+```
 
-        Uses window.SetContent() to swap views
+## API contract
 
-    Rules:
+The client calls the routes `fynchat-backend` actually serves. Paths live in
+named constants at the top of `httpclient.go`, so aligning with a future
+backend change is a one-line edit:
 
-        Every UI update that happens from a goroutine (after an HTTP call) must be wrapped in fyne.Do or fyne.DoAndWait.
+| Client method | Request | Auth | Expected response |
+| --- | --- | --- | --- |
+| `Login` | `POST /login` `{email, password}` | – | `{"token": "...", "user": {...}}` |
+| `Register` | `POST /register` `{name, username, email, password}` | – | `{"token": "...", "user": {...}}` |
+| `ListChannels` | `GET /api/channels` | Bearer | `[{"id", "channel_name", "channel_avatar"}, ...]` |
+| `CreateChannel` | `POST /api/channel/create` `{channel_type, name, avatar_url}` | Bearer | `{"channel_name", "channel_avatar"}` |
+| `ListMessages` | `GET /api/channels/{id}/messages` | Bearer | `[{"id", "channel_id", "sender_id", "content", "created_at"}, ...]` |
+| `SendMessage` | `POST /api/message/create/{id}` `{content}` | Bearer | the created message |
 
-        Handle every error. No ignored errors.
+Details:
 
-        Use fyne.io/fyne/v2 and fyne.io/fyne/v2/widget, fyne.io/fyne/v2/container, fyne.io/fyne/v2/dialog.
+- Authenticated requests always carry `Authorization: Bearer <token>`, which
+  is what `middlewares.Auth` expects.
+- The token is read from `token` **or** `access_token`, so the client works
+  with both the current handlers and the original API spec.
+- Non-2xx responses become Go errors that include the status code and a
+  512-byte snippet of the response body, and every error is surfaced with
+  `dialog.ShowError` rather than being swallowed.
 
-        Don't use any Fyne community extensions unless necessary. Stick to core Fyne.
+### Backend requirements
 
-        One file per view.
+Two of the six routes do not exist in `fynchat-backend` yet. Until they are
+added, channel history and message history will fail with a 404 dialog; login,
+register and channel creation work as-is.
 
-        Keep the code simple. No over-engineering. No state management library. Just structs, fields, and callbacks.
+| Route the client needs | Backend status | Change required |
+| --- | --- | --- |
+| `GET /api/channels` | ❌ missing | add a list handler returning channel rows including `id` |
+| `GET /api/channels/:id/messages` | ❌ missing | add a history handler returning message rows |
+| `POST /api/message/create/:channel_id` | ⚠️ registered without the param | `MessageHandler.Create` reads `c.Param("channel_id")`, so the route must be `api.POST("/message/create/:channel_id", messagesHandler.Create)` — as registered today it always 400s on an empty channel id |
+| `ws://…/ws` | ❌ missing | see [`docs/websockets.md`](docs/websockets.md) |
+| Port | ⚠️ `SERVER_PORT` defaults to `8000` | run with `FYNCHAT_API_URL=http://localhost:8000` |
 
-    What I want from you first: Start with only the httpClient file. Write it completely. Then wait for my confirmation before writing the next file
+Also note, when you build the backend itself:
+
+- its `go.mod` declares `module fynchat.com` while the code imports
+  `fynchat/internal/...`, so it does not compile as committed;
+- `routes.Setup` takes a `messagesHandler` argument that `cmd/fynchat/main.go`
+  does not pass.
+
+Both belong to the backend repo — this README only records them.
+
+## WebSockets
+
+`chat.go` opens **one connection per open chat** to:
+
+```
+ws://<host>/ws?channel_id=<id>&token=<jwt>
+```
+
+and appends every pushed `Message` JSON object to the list. REST stays the
+write path — sending is a normal `POST`, the socket is receive-only. Messages
+are de-duplicated by `Message.ID`, so the message you send is not rendered
+twice when the server echoes it back.
+
+The connection is closed when you press **Back** or close the window. If the
+endpoint is absent the dialog is shown once and the view keeps working over
+REST.
+
+**Server side:** [`docs/websockets.md`](docs/websockets.md) is the full Hub /
+client-pump / broadcast design to port into `fynchat-backend`, including
+heartbeats, reconnect backoff and the Redis Pub/Sub path for multi-instance
+deployments.
+
+## Testing
+
+```bash
+go test -race ./...
+```
+
+`httpclient_test.go` runs the client against `net/http/httptest` servers and
+covers: login, register, the backend's `token` field, error responses, the
+`Bearer` header, request bodies and paths, list/create channel, list/send
+message, and malformed JSON. No backend and no database needed — but the
+system packages from [Requirements](#requirements) are, because `go test`
+compiles the whole `main` package including the Fyne views.
+
+Expected result:
+
+```
+ok  	fynchat	1.034s
+```
+
+`gofmt -l .` and `go vet ./...` are clean.
+
+## Cross-compiling
+
+Fyne cross-compiles from Linux through [fyne-cross](https://github.com/fyne-io/fyne-cross):
+
+```bash
+go install fyne.io/tools/cmd/fyne-cross@latest
+fyne-cross windows   # -> fynchat.exe
+fyne-cross darwin
+```
+
+Scratch output lands in `fyne-cross/tmp/` (git-ignored).
+
+## Roadmap
+
+- [ ] Backend: add `GET /api/channels` and `GET /api/channels/:id/messages`,
+      and fix the `:channel_id` param on `POST /api/message/create` — see
+      [Backend requirements](#backend-requirements).
+- [ ] Implement the Hub described in `docs/websockets.md` in the backend.
+- [ ] Reconnect with exponential backoff + re-fetch after reconnect.
+- [ ] Refresh-token support (`/api/request` in the backend) so long sessions
+      do not die on an expired JWT.
+- [ ] Persist the token so the app reopens on the channel list.
+- [ ] Message grouping, avatars, timestamps and `channel_type` handling in the
+      channel list.
+- [ ] `fynproto` (FCP) transport as the long-term replacement for REST + WS.
+
+## Contributing
+
+Issues and PRs are welcome. Please keep the style of the existing code: one
+file per view, `fyne.Do` around every goroutine-driven UI update, no ignored
+errors, and no dependencies outside core Fyne unless there is a strong reason.
+
+## License
+
+[MIT](LICENSE) © 2026 FynChat

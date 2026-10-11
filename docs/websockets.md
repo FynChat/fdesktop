@@ -1,5 +1,15 @@
 # WebSockets for FynChat: Hub, Client, Broadcast
 
+> **Status: design document.** `fynchat-backend` does not expose a `/ws`
+> endpoint yet — this is the reference implementation to port server-side.
+> The desktop client (`chat.go`) already speaks this protocol with
+> `github.com/coder/websocket` and fails gracefully when the endpoint is
+> absent (REST polling still works).
+>
+> Library note: the examples below use `gorilla/websocket`; the client uses
+> `github.com/coder/websocket` (formerly `nhooyr.io/websocket`), which has the
+> same read/write-pump model. See item 10 below.
+
 The current frontend polls the REST API (`ListMessages`, `SendMessage`). That
 works but adds latency and waste. With WebSockets the server pushes new
 messages to every client in a channel the moment they arrive.
