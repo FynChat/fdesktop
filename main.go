@@ -1,18 +1,19 @@
 package main
 
 import (
+	"log"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 )
 
-// main creates the Fyne app, a single window, and the shared HTTPClient,
-// then wires the views together:
-//
-//	Login ⇄ Register → Channels → Chat
-//	Chat --Back--> Channels --Logout--> Login
 func main() {
-	a := app.New()
-	a.Settings().SetTheme(newTelegramTheme())
+	// NewWithID, not New: the Preferences API refuses to store anything
+	// without a unique app ID, which would silently break session persistence.
+	a := app.NewWithID("com.fynchat.desktop")
+
+	prefs := NewPrefs(a.Preferences())
+	prefs.apply() // restore the theme chosen last time
 
 	w := a.NewWindow("FynChat")
 	w.SetIcon(appIcon())
@@ -20,36 +21,73 @@ func main() {
 	client := NewHTTPClient()
 	client.AttachPersistence(a.Preferences())
 
-	var selectedChannel Channel
+	// Demo mode serves canned data from memory and signs straight in, so the
+	// layout can be looked at without a backend.
+	demo := demoEnabled()
+	if demo {
+		url, stop := startDemoServer()
+		defer stop()
+		baseURL = url
 
-	var showLogin, showRegister, showChannels, showChat func()
+		if _, err := client.Login("demo@example.com", "demo"); err != nil {
+			log.Fatalf("demo: %v", err)
+		}
+	}
+
+	// Declared before the handlers below, which close over them.
+	var showLogin, showRegister func()
+
+	// home swaps the whole window for the two-pane shell and returns the
+	// function that opens a chat in its right-hand pane.
+	var home func() func(Channel)
+	home = func() func(Channel) {
+		layout, openChat := shell(client, prefs, w, showLogin)
+		w.SetContent(layout)
+		return openChat
+	}
 
 	showLogin = func() {
-		w.SetContent(loginView(client, w, showChannels, showRegister))
+		w.SetContent(loginView(client, w, func() { home() }, showRegister))
 	}
 	showRegister = func() {
-		w.SetContent(registerView(client, w, showChannels, showLogin))
-	}
-	showChannels = func() {
-		w.SetContent(channelsView(client, w, func(ch Channel) {
-			selectedChannel = ch
-			showChat()
-		}, showLogin))
-	}
-	showChat = func() {
-		w.SetContent(chatView(client, w, selectedChannel.ID, selectedChannel.ChannelName, showChannels))
+		w.SetContent(registerView(client, w, func() { home() }, showLogin))
 	}
 
-	// A remembered token means we can skip the login screen. If it turned out
-	// to be expired, the channels view shows the error and its Log out button
-	// brings the user back here.
-	if client.Token != "" {
-		showChannels()
+	// An expired token would otherwise fail every request with a dialog. The
+	// client tells us once, and we drop back to the login screen.
+	client.SetSessionExpiredHandler(func() {
+		fyne.Do(func() {
+			client.Logout()
+			showLogin()
+		})
+	})
+
+	if demo || client.Token != "" {
+		openChat := home()
+
+		// Reopen the channel that was open last time, if it still exists.
+		if last := prefs.LastChannel(); last != "" {
+			go func() {
+				channels, err := client.ListChannels()
+				if err != nil {
+					return
+				}
+
+				fyne.Do(func() {
+					for _, ch := range channels {
+						if ch.ID == last {
+							openChat(ch)
+							return
+						}
+					}
+				})
+			}()
+		}
 	} else {
 		showLogin()
 	}
-	// Big enough to read a conversation without scrolling sideways, small
-	// enough to sit next to a terminal. The window stays resizable.
-	w.Resize(fyne.NewSize(960, 680))
+
+	// Two panes need room: the list is a fixed 300 points wide.
+	w.Resize(fyne.NewSize(1000, 680))
 	w.ShowAndRun()
 }

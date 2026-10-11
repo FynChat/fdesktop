@@ -2,7 +2,6 @@ package main
 
 import (
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -18,28 +17,44 @@ func registerView(client *HTTPClient, w fyne.Window, onRegisterSuccess func(), o
 
 	email := widget.NewEntry()
 	email.SetPlaceHolder("Email")
+	email.Validator = emailValidator
 
 	password := widget.NewPasswordEntry()
-	password.SetPlaceHolder("Password (8 characters minimum)")
+	password.SetPlaceHolder("Password")
 
-	registerBtn := widget.NewButton("Create account", func() {
+	banner := errorBannerWidget()
+
+	registerBtn := asyncButton("Create account", "Creating your account…", func() {
+		if err := validateRegistration(name.Text, username.Text, email.Text, password.Text); err != nil {
+			banner.Show(err)
+			return
+		}
+
 		go func() {
 			_, err := client.Register(name.Text, username.Text, email.Text, password.Text)
+
 			fyne.Do(func() {
 				if err != nil {
-					dialog.ShowError(err, w)
+					banner.Show(err)
 					return
 				}
 				onRegisterSuccess()
 			})
 		}()
 	})
+	registerBtn.Importance = widget.HighImportance
 	password.OnSubmitted = func(string) { registerBtn.OnTapped() }
 
-	fields := []fyne.CanvasObject{name, username, email, password}
+	fields := []fyne.CanvasObject{
+		labelledField("Name", name),
+		labelledField("Username", username),
+		labelledField("Email", email),
+		labelledField("Password", password),
+	}
 
 	return authLayout("Create your account", "Pick a username — this is how people will see you.",
 		fields,
+		banner,
 		registerBtn,
 		"Already registered?",
 		"Sign in",

@@ -205,3 +205,89 @@ func quietButton(label string, onTapped func()) *widget.Button {
 	b.Importance = widget.LowImportance
 	return b
 }
+
+// iconButton is a borderless button showing a single icon, for header actions.
+func iconButton(icon fyne.Resource, onTapped func()) *widget.Button {
+	b := widget.NewButtonWithIcon("", icon, onTapped)
+	b.Importance = widget.LowImportance
+	return b
+}
+
+// asyncButton runs an action on a goroutine while the button shows a working
+// label and refuses further taps. Without this, a double click on a slow
+// connection sends the request twice.
+func asyncButton(label, busyLabel string, run func()) *widget.Button {
+	b := widget.NewButton(label, nil)
+	b.OnTapped = func() {
+		if b.Disabled() {
+			return // a run is already in flight
+		}
+		b.Disable()
+		b.SetText(busyLabel)
+
+		go func() {
+			run()
+
+			fyne.Do(func() {
+				b.Enable()
+				b.SetText(label)
+			})
+		}()
+	}
+	return b
+}
+
+// errorBanner is the non-blocking error strip. A modal dialog for a failed
+// send is heavy: the banner sits under the content, can be dismissed, and
+// leaves the form filled in.
+type errorBanner struct {
+	label *widget.Label
+	box   *fyne.Container
+	wrap  *fyne.Container
+}
+
+func errorBannerWidget() *errorBanner {
+	label := widget.NewLabel("")
+	label.Wrapping = fyne.TextWrapWord
+	b := &errorBanner{label: label}
+
+	background := canvas.NewRectangle(color.NRGBA{R: 0x7A, G: 0x27, B: 0x2E, A: 0xFF})
+	background.CornerRadius = 8
+
+	content := container.NewStack(background, container.NewCenter(container.NewPadded(label)))
+	b.box = content
+	b.wrap = container.NewCenter(content)
+
+	b.label.Importance = widget.HighImportance
+	b.clear()
+	return b
+}
+
+// Show puts a message in the banner.
+func (b *errorBanner) Show(err error) {
+	if err == nil {
+		b.clear()
+		return
+	}
+	b.label.SetText(err.Error())
+	b.show()
+}
+
+// ShowMessage puts a plain string in the banner.
+func (b *errorBanner) ShowMessage(text string) {
+	b.label.SetText(text)
+	b.show()
+}
+
+// Clear empties the banner.
+func (b *errorBanner) Clear() { b.clear() }
+
+func (b *errorBanner) clear() {
+	b.label.SetText("")
+	b.wrap.Hide()
+}
+
+func (b *errorBanner) show() {
+	b.wrap.Show()
+	b.wrap.Refresh()
+}

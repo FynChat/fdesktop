@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,14 +13,53 @@ import (
 	"fyne.io/fyne/v2"
 )
 
+// Keys used to store the session and small bits of UI state in the app
+// preferences, so the app opens where you left it.
+const (
+	prefToken       = "session.token"
+	prefUserID      = "session.user_id"
+	prefUserName    = "session.user_name"
+	prefLastChannel = "session.last_channel"
+	prefThemeDark   = "ui.dark_theme"
+)
+
 // defaultBaseURL is used when FYNCHAT_API_URL is not set.
 const defaultBaseURL = "http://localhost:8080"
 
-// Keys used to store the session in the app preferences.
-const (
-	prefToken  = "session.token"
-	prefUserID = "session.user_id"
-)
+// Prefs wraps the app preferences in typed helpers, so the storage layout of
+// the session and the small bits of UI state lives in one place.
+type Prefs struct {
+	p fyne.Preferences
+}
+
+// NewPrefs wraps the app preferences.
+func NewPrefs(p fyne.Preferences) *Prefs { return &Prefs{p: p} }
+
+// LastChannel returns the id of the channel that was open last time, if any.
+func (s *Prefs) LastChannel() string { return s.p.String(prefLastChannel) }
+
+// SetLastChannel remembers the channel to reopen on the next launch.
+func (s *Prefs) SetLastChannel(id string) { s.p.SetString(prefLastChannel, id) }
+
+// UserName returns the name of the signed-in user, if it was remembered.
+func (s *Prefs) UserName() string { return s.p.String(prefUserName) }
+
+// DarkTheme reports whether the dark theme is selected.
+func (s *Prefs) DarkTheme() bool { return s.p.BoolWithFallback(prefThemeDark, true) }
+
+// SetDarkTheme stores the theme choice.
+func (s *Prefs) SetDarkTheme(dark bool) { s.p.SetBool(prefThemeDark, dark) }
+
+// apply puts the stored theme on the running app.
+func (s *Prefs) apply() {
+	if s.DarkTheme() {
+		currentIsDark = true
+		fyne.CurrentApp().Settings().SetTheme(newTelegramTheme())
+	} else {
+		currentIsDark = false
+		fyne.CurrentApp().Settings().SetTheme(newLightTheme())
+	}
+}
 
 // Routes served by FynChat/fynchat-backend (internal/routes/routes.go).
 // Everything that needs a JWT lives under the authenticated /api group.
@@ -70,9 +110,11 @@ type Message struct {
 type HTTPClient struct {
 	Token  string
 	UserID int
+	Name   string
 	Client *http.Client
 
-	prefs fyne.Preferences
+	prefs            fyne.Preferences
+	onSessionExpired func()
 }
 
 // NewHTTPClient returns an HTTPClient with a default http.Client.
@@ -91,20 +133,28 @@ func (c *HTTPClient) AttachPersistence(prefs fyne.Preferences) {
 
 	c.Token = prefs.String(prefToken)
 	c.UserID = prefs.Int(prefUserID)
+	c.Name = prefs.String(prefUserName)
 }
 
 // Logout clears the session in memory and on disk.
 func (c *HTTPClient) Logout() {
 	c.Token = ""
 	c.UserID = 0
+	c.Name = ""
 
 	if c.prefs != nil {
 		// Fyne's Preferences has no Remove, so an empty value is the
 		// "logged out" state: AttachPersistence reads "" as no token.
 		c.prefs.SetString(prefToken, "")
 		c.prefs.SetInt(prefUserID, 0)
+		c.prefs.SetString(prefUserName, "")
 	}
 }
+
+// ErrUnauthorized is returned when the backend rejects the stored token.
+// Views use it to send the user back to the login screen instead of showing a
+// dialog for every request that fails from then on.
+var ErrUnauthorized = errors.New("your session has expired, please sign in again")
 
 // do sends a request and decodes the JSON response into out.
 // If authenticated is true, the Authorization: Bearer <token> header is set.
@@ -135,6 +185,14 @@ func (c *HTTPClient) do(method, path string, body interface{}, authenticated boo
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+
+		// A 401 on an authenticated call means the token expired. /login and
+		// /register also answer 401 for a wrong password, which is not an
+		// expired session, so only the authenticated ones count.
+		if resp.StatusCode == http.StatusUnauthorized && authenticated {
+			c.sessionExpired()
+			return fmt.Errorf("%s %s: %w", method, path, ErrUnauthorized)
+		}
 		return fmt.Errorf("%s %s: status %d: %s", method, path, resp.StatusCode, string(snippet))
 	}
 
@@ -144,6 +202,19 @@ func (c *HTTPClient) do(method, path string, body interface{}, authenticated boo
 		}
 	}
 	return nil
+}
+
+// SetSessionExpiredHandler registers a callback run when the backend rejects
+// the token. It is called on the goroutine that made the request, so the
+// handler must marshal to the UI thread with fyne.Do itself.
+func (c *HTTPClient) SetSessionExpiredHandler(fn func()) {
+	c.onSessionExpired = fn
+}
+
+func (c *HTTPClient) sessionExpired() {
+	if c.onSessionExpired != nil {
+		c.onSessionExpired()
+	}
 }
 
 type authResponse struct {
@@ -177,10 +248,12 @@ func (r authResponse) accessToken() string {
 func (c *HTTPClient) store(r authResponse) string {
 	c.Token = r.accessToken()
 	c.UserID = r.User.ID
+	c.Name = r.User.Name
 
 	if c.prefs != nil {
 		c.prefs.SetString(prefToken, c.Token)
 		c.prefs.SetInt(prefUserID, c.UserID)
+		c.prefs.SetString(prefUserName, c.Name)
 	}
 	return c.Token
 }

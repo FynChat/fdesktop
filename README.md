@@ -39,38 +39,60 @@ FCP lands — see [Roadmap](#roadmap).
 
 ## Features
 
-- **Register / login** — email + password, JWT stored in the shared client.
-- **Channel list** — scrollable list, create a channel with a type, name and
-  avatar URL, refresh after creation.
-- **Chat view** — message history, send with the button or `Enter`, live
-  messages pushed over a WebSocket.
-- **Logout** — clears the token and returns to the login view.
-- **Single window, view swapping** — `Login ⇄ Register → Channels → Chat`.
+- **Register / login** — checked in the form before anything is sent, JWT stored
+  in the shared client.
+- **Channel list** — avatars, channel type, create a channel, pull to refresh.
+- **Chat view** — history as bubbles with sender and time, own messages on the
+  right, consecutive messages grouped, date separators, live push over a
+  WebSocket when the backend exposes one.
+- **Dark and light** — the palette icon in the header switches, and the choice
+  is remembered.
+- **Stays where you left off** — the session, the last channel and the theme
+  are stored in the app preferences, so the app reopens on the channel you had
+  open instead of the login form.
+- **Session expiry** — a rejected token drops you back to the login screen
+  once, instead of failing every action with a dialog.
+- **One window, two panes** — the chat list stays put while the conversation
+  beside it changes, and the divider is draggable.
 - **Correct threading** — every HTTP call runs on a goroutine and every UI
   mutation goes through `fyne.Do`.
 - **Configurable backend URL** — point the app at any host with
   `FYNCHAT_API_URL` instead of editing code.
 
+### Details worth knowing
+
+- **Errors use a banner, not a dialog.** A failed send leaves your text in the
+  box so you can retry instead of retyping.
+- **Buttons lock while a request is in flight**, so a double click cannot send
+  the same message twice.
+- **The scroll only follows new messages when you are already at the bottom.**
+  Reading older messages is not interrupted by someone talking.
+
 ## Screens
 
+The app is one window split in two, the way Telegram Desktop is: the channel
+list on the left, the open conversation on the right. Picking a chat swaps only
+the pane beside the list, so you never navigate back to a list to change
+conversation. The divider is draggable.
+
 ```
-   ┌───────────┐        ┌──────────────┐        ┌─────────────┐
-   │   Login   │ <────► │  Register    │        │  Channels   │
-   │ email/pw  │        │ name/user/   │        │  ▸ general  │
-   └─────┬─────┘        │ email/pw     │        │  ▸ random   │
-         │              └──────┬───────┘        │  [+ New]    │
-         └──────────────────────┘               │  [ Logout]  │
-                     on success                 └──────┬──────┘
-                                                    │ click
-   ┌────────────────────────────────────────────────▼──────────┐
-   │ ‹ Back            # general                                  │
-   │─────────────────────────────────────────────────────────────│
-   │ ada: hello there                                           │
-   │ lin: hi!                                                   │
-   │─────────────────────────────────────────────────────────────│
-   │ [ Type a message...                    ] [ Send ]            │
-   └────────────────────────────────────────────────────────────┘
+┌──────────────────────┬────────────────────────────────────────┐
+│ +  Search channels 🎨🗑│  general                    🎨 ⟳      │
+├──────────────────────┤  Group                                    │
+│ (G) general      group│  ─────────────────────────────────────  │
+│ (D) design-team channel│              Yesterday                   │
+│ (A) ada          p2p │  (2) User #2            12:00            │
+│                      │      morning everyone — finally green   │
+│  ← open chat is      │  (3) User #3            09:00            │
+│    filled with the   │      does the channel list still 404?   │
+│    accent colour     │                  no — added yesterday   │
+│                      │  ─────────────────────────────────────  │
+│                      │  [ Message…                       ➤    │
+└──────────────────────┴────────────────────────────────────────┘
 ```
+
+Before signing in there is no list to show, so the auth screens take the whole
+window.
 
 ## Project layout
 
@@ -83,15 +105,21 @@ state-management library, just structs, fields and callbacks.
 | `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods |
 | `login.go` | `loginView(...)` — email/password form |
 | `register.go` | `registerView(...)` — name/username/email/password form |
-| `channels.go` | `channelsView(...)` — channel list, new-channel dialog, logout |
-| `chat.go` | `chatView(...)` — history, composer, WebSocket live messages |
+| `channels.go` | `sidebarView(...)` — the chat list column: search, rows, new channel |
+| `shell.go` | the two-pane window and the pane swap |
+| `chat.go` | `chatView(...)` — header, history as bubbles, composer |
 | `httpclient_test.go` | `httptest`-based tests for every HTTP method |
+| `session_test.go` | the session survives a restart and logout clears it |
+| `validate_test.go` | form validation rules |
+| `shot_test.go` | renders each view to a PNG for review (`make shots`) |
+| `dialog.go` | the new-channel modal: type picker, live avatar preview, inline errors |
+| `demo.go` | `FYNCHAT_DEMO=1` sample data, served from memory |
 | `docs/websockets.md` | Hub / client-pump / broadcast design doc (server-side) |
 
 Navigation is done by passing callbacks. `main.go` owns the transitions:
 
 ```go
-Login ⇄ Register → Channels → Chat
+Login ⇄ Register → the two-pane window ⇄ Chat
 Chat --Back--> Channels --Logout--> Login
 ```
 
@@ -130,6 +158,19 @@ sudo pacman -S base-devel pkgconf mesa wayland libxkbcommon libx11 libxcursor li
 
 - **A running `fynchat-backend`** (see the repo link above). Without it the app
   starts but every request fails with a connection error dialog.
+
+## Demo mode
+
+To look at the UI without a backend, a database or an account:
+
+```bash
+FYNCHAT_DEMO=1 go run .
+```
+
+It starts an in-process server that answers the same routes the real backend
+does, with sample channels and a conversation long enough to show grouping,
+date separators, both bubble styles and a wrapped message. The app takes the
+same code path as with a real backend — nothing is mocked inside the views.
 
 ## Getting started
 
@@ -249,6 +290,12 @@ ok  	fynchat	1.034s
 ```
 
 `gofmt -l .` and `go vet ./...` are clean.
+
+`make shots` renders every view to a PNG with the Fyne software driver, which
+is how the UI gets reviewed without opening a window. It sits behind a
+`screenshot` build tag because Fyne's test driver runs `fyne.Do` inline rather
+than queueing it, so the race detector fires on the harness even though the
+app is correct.
 
 ## Cross-compiling
 
