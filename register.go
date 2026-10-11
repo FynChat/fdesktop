@@ -45,7 +45,12 @@ func registerView(client *HTTPClient, w fyne.Window, onRegisterSuccess func(), o
 	registerBtn.Importance = widget.HighImportance
 	password.OnSubmitted = func(string) { registerBtn.OnTapped() }
 
-	fields := []fyne.CanvasObject{name, username, email, password}
+	fields := []fyne.CanvasObject{
+		labelledField("Name", name),
+		labelledField("Username", username),
+		labelledField("Email", email),
+		labelledField("Password", password),
+	}
 
 	return authLayout("Create your account", "Pick a username — this is how people will see you.",
 		fields,

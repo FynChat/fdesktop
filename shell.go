@@ -34,24 +34,41 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 	}
 
 	// The sidebar needs to highlight a row when its chat is opened, and it
-	// only exists after openChat does, so it is filled in below.
-	var markOpen func(Channel)
+	// only exists after openChat does, so it is filled in below. The same goes
+	// for the menu, which the sidebar's hamburger button opens.
+	var side sidebar
+	var menu *sideMenu
+
 	onSelect := func(ch Channel) {
-		markOpen(ch)
+		side.markOpen(ch)
 		openChat(ch)
 	}
 
-	sidebar, markOpen := sidebarView(client, prefs, w, onSelect, onLogout)
+	side = sidebarView(client, prefs, w, onSelect, onLogout, func() {
+		menu.toggle(w.Canvas().Size())
+	})
+
+	menu = newSideMenu(client, prefs, side, onLogout, nil)
+	menu.scrim = menu.scrimFor()
 
 	// A draggable split, like the divider in Telegram Desktop: the list keeps
 	// roughly a third of the window and both sides can be resized.
-	split := container.NewHSplit(sidebar, content)
+	split := container.NewHSplit(side.view, content)
 	split.Offset = 0.3
+
+	// The menu floats above everything, parked off screen to the left until
+	// the hamburger opens it.
+	holder := container.NewWithoutLayout(menu.panel)
+	holder.Resize(fyne.NewSize(menuWidth, 1))
+	menu.panel.Move(fyne.NewPos(-menuWidth, 0))
+
+	overlay := container.NewStack(split)
+	overlay.Objects = append(overlay.Objects, menu.scrimFor(), holder)
 
 	// Opening a chat from anywhere else, such as restoring the last one on
 	// launch, still marks the row.
-	return split, func(ch Channel) {
-		markOpen(ch)
+	return overlay, func(ch Channel) {
+		side.markOpen(ch)
 		openChat(ch)
 	}
 }

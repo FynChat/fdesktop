@@ -181,8 +181,8 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	sending.OnTapped = send
 	entry.OnSubmitted = func(string) { send() }
 
-	// Telegram puts the channel name on one line and a quieter summary under
-	// it, with the search and menu actions on the right.
+	// Telegram puts the avatar, then the channel name on one line with a quieter
+	// summary under it, and the actions on the right.
 	title := canvas.NewText(channelName, theme.ForegroundColor())
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.TextSize = theme.Size(theme.SizeNameSubHeadingText)
@@ -190,7 +190,10 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	subtitle := canvas.NewText(channelTypeLabel(channelType), theme.PlaceHolderColor())
 	subtitle.TextSize = theme.Size(theme.SizeNameCaptionText)
 
-	heading := container.NewVBox(title, subtitle)
+	heading := container.NewHBox(
+		container.NewGridWrap(fyne.NewSquareSize(36), avatar(initial(channelName), 36)),
+		container.NewVBox(title, subtitle),
+	)
 
 	refreshBtn := iconButton(theme.ViewRefreshIcon(), func() {
 		banner.Clear()
@@ -307,21 +310,6 @@ func messageRow(m Message, myUserID int, grouped bool) fyne.CanvasObject {
 		letter = strconv.Itoa(m.SenderID)
 	}
 
-	// Name and timestamp live inside the bubble, above the text.
-	meta := container.NewHBox()
-	if !mine && !grouped {
-		meta.Add(canvas.NewText(name, theme.ForegroundColor()))
-		meta.Add(layout.NewSpacer())
-	}
-	if stamp := messageTime(m); stamp != "" {
-		meta.Add(canvas.NewText(stamp, theme.PlaceHolderColor()))
-	}
-	for _, obj := range meta.Objects {
-		if t, ok := obj.(*canvas.Text); ok {
-			t.TextSize = theme.Size(theme.SizeNameCaptionText)
-		}
-	}
-
 	// A Label (not canvas.Text) so long messages wrap instead of running off
 	// the edge of the window. A wrapped label reports a tiny minimum width,
 	// so the bubble rectangle carries the width instead: the Stack then hands
@@ -334,12 +322,25 @@ func messageRow(m Message, myUserID int, grouped bool) fyne.CanvasObject {
 		width = 340
 	}
 
+	// The sender's name goes on its own line above the text and the time in
+	// the bottom-right corner of the bubble, where Telegram puts it: a heading
+	// above the message reads like a label for the whole conversation.
+	var parts []fyne.CanvasObject
+	if !mine && !grouped {
+		who := canvas.NewText(name, senderColour(m.SenderID))
+		who.TextStyle = fyne.TextStyle{Bold: true}
+		parts = append(parts, who)
+	}
+	parts = append(parts, body)
+	if stamp := messageTime(m); stamp != "" {
+		parts = append(parts, rightAligned(smallText(stamp)))
+	}
+
 	bubble := canvas.NewRectangle(bubbleColor(mine))
 	bubble.CornerRadius = 12
 	bubble.SetMinSize(fyne.NewSize(width, 28))
 
-	content := container.NewVBox(meta, body)
-	stack := container.NewStack(bubble, container.NewPadded(content))
+	stack := container.NewStack(bubble, container.NewPadded(container.NewVBox(parts...)))
 
 	if mine {
 		return container.NewHBox(layout.NewSpacer(), stack)
@@ -363,12 +364,30 @@ func bubbleColor(mine bool) color.Color {
 	return incomingBubble()
 }
 
-// messageTime formats the RFC3339 timestamp the backend sends, returning ""
-// when it does not parse so a bad value never breaks the row.
+// messageTime formats the timestamp the way a person reads a clock on their
+// own wall: 12-hour with AM/PM, converted from the server's offset into the
+// machine's local time. Showing 14:05 to someone whose clock says 2:05 PM
+// makes the message look like it arrived in the future.
+//
+// Returns "" when the timestamp does not parse, so a bad value never breaks
+// the row.
 func messageTime(m Message) string {
 	t, err := time.Parse(time.RFC3339, m.CreatedAt)
 	if err != nil {
 		return ""
 	}
-	return t.Format("15:04")
+	return t.Local().Format("3:04 PM")
+}
+
+// smallText is the quiet size used for timestamps and other asides.
+func smallText(s string) *canvas.Text {
+	t := canvas.NewText(s, theme.PlaceHolderColor())
+	t.TextSize = theme.Size(theme.SizeNameCaptionText)
+	return t
+}
+
+// senderColour gives each sender a stable name colour, the way Telegram does,
+// so you can tell who is talking without reading the id.
+func senderColour(senderID int) color.Color {
+	return avatarColor(strconv.Itoa(senderID))
 }

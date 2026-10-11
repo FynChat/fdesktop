@@ -26,8 +26,8 @@ type channelRow struct {
 	container  *fyne.Container
 	background *canvas.Rectangle
 	avatarBox  *fyne.Container
+	badge      *fyne.Container
 	name       *widget.RichText
-	sub        *widget.RichText
 }
 
 func newChannelRow() *channelRow {
@@ -37,79 +37,80 @@ func newChannelRow() *channelRow {
 		Style: widget.RichTextStyleStrong,
 		Text:  "channel",
 	})
-	sub := widget.NewRichText(&widget.TextSegment{
-		Style: widget.RichTextStyle{
-			SizeName:  theme.SizeNameCaptionText,
-			ColorName: theme.ColorNamePlaceHolder,
-		},
-		Text: "group",
-	})
+
+	// A small badge on the right says what kind of channel this is. A
+	// one-to-one conversation has none: the person's avatar already says it.
+	badge := container.NewCenter(container.NewGridWrap(fyne.NewSquareSize(16),
+		canvas.NewRectangle(color.Transparent)))
 
 	avatarBox := container.NewGridWrap(fyne.NewSquareSize(40), avatar("?", 40))
 
-	// One RichText per line, not a VBox of two padded labels: padding each
-	// line separately doubles the gap and makes every row far taller than the
-	// chat list it is imitating.
-	text := container.NewVBox(name, sub)
-	body := container.NewPadded(container.NewHBox(avatarBox, text))
+	// One RichText, not a VBox of two lines: the row is avatar, name and
+	// badge, and the type is no longer spelled out underneath it.
+	body := container.NewBorder(nil, nil, avatarBox, badge, container.NewPadded(name))
 
 	return &channelRow{
-		container:  container.NewStack(background, container.NewPadded(body)),
+		container:  container.NewStack(background, body),
 		background: background,
 		avatarBox:  avatarBox,
 		name:       name,
-		sub:        sub,
+		badge:      badge,
 	}
 }
 
-// update fills the row and paints its selected state. The open chat is filled
-// with the accent colour and its text turns white, which is how Telegram
-// shows where you are.
+// update fills the row, paints its selected state and swaps in the badge for
+// the channel's kind.
 func (r *channelRow) update(ch Channel, selected bool) {
 	r.avatarBox.Objects[0] = avatar(initial(ch.ChannelName), 40)
 	r.avatarBox.Refresh()
 
-	nameColour, subColour := theme.ColorNameForeground, theme.ColorNamePlaceHolder
+	if icon := kindIcon(ch.ChannelType); icon != nil {
+		r.badge.Objects[0] = container.NewGridWrap(fyne.NewSquareSize(16), icon)
+		r.badge.Show()
+	} else {
+		r.badge.Hide()
+	}
+	r.badge.Refresh()
+
+	// The selected row flips to white text on the accent blue, which is how
+	// Telegram shows the open chat.
+	nameColour := theme.ColorNameForeground
 	if selected {
-		nameColour, subColour = theme.ColorNameForegroundOnPrimary, theme.ColorNameForegroundOnPrimary
+		nameColour = theme.ColorNameForegroundOnPrimary
 		r.background.FillColor = accent
 	} else {
 		r.background.FillColor = color.Transparent
 	}
 
-	nameStyle := widget.RichTextStyle{
-		Inline:    true,
-		SizeName:  theme.SizeNameText,
-		TextStyle: fyne.TextStyle{Bold: true},
-		ColorName: nameColour,
-	}
-
 	r.name.Segments = []widget.RichTextSegment{
-		&widget.TextSegment{Style: nameStyle, Text: ch.ChannelName},
-	}
-	r.name.Refresh()
-
-	r.sub.Segments = []widget.RichTextSegment{
 		&widget.TextSegment{
 			Style: widget.RichTextStyle{
-				SizeName:  theme.SizeNameCaptionText,
-				ColorName: subColour,
+				Inline:    true,
+				SizeName:  theme.SizeNameText,
+				TextStyle: fyne.TextStyle{Bold: true},
+				ColorName: nameColour,
 			},
-			Text: ch.ChannelType,
+			Text: ch.ChannelName,
 		},
 	}
-	r.sub.Refresh()
+	r.name.Refresh()
 	r.background.Refresh()
 }
 
-// sidebarView is the left column: a search box over the chat list, with the
-// new-channel, theme and log-out actions above it. Selecting a row calls
-// onSelect, which swaps the content pane beside it — Telegram Desktop's
-// two-pane layout, where the list stays put while you move between chats.
-//
-// It also returns markOpen, so the caller can highlight a chat it opened on
-// its own, such as the one that was open last launch.
-func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(Channel), onLogout func()) (fyne.CanvasObject, func(Channel)) {
+// sidebar is the left column plus the two things the shell needs to wire it
+// into the app: a way to highlight a row it opened by itself, and the search
+// entry, which now lives in the side menu rather than the header.
+type sidebar struct {
+	view     fyne.CanvasObject
+	markOpen func(Channel)
+	search   *widget.Entry
+}
+
+// sidebarView is the left column: the app name with the menu button in the
+// corner, over the chat list. Selecting a row calls onSelect, which swaps the
+// content pane beside it — Telegram Desktop's two-pane layout, where the list
+// stays put while you move between chats.
+func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(Channel), onLogout, onMenu func()) sidebar {
 	var (
 		all     []Channel // everything the backend returned
 		visible []Channel // what the search box leaves visible
@@ -221,25 +222,21 @@ func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(
 		})
 	})
 
-	themeBtn := iconButton(theme.ColorPaletteIcon(), func() {
-		if prefs == nil {
-			return
-		}
-		prefs.SetDarkTheme(!prefs.DarkTheme())
-		prefs.apply()
-	})
+	// The header is the app name and one button. Everything else — new
+	// channel, theme, log out, search — lives in the menu that slides out
+	// from it, which is where Telegram keeps them too.
+	appName := canvas.NewText("FynChat", theme.ForegroundColor())
+	appName.TextStyle = fyne.TextStyle{Bold: true}
+	appName.TextSize = theme.Size(theme.SizeNameSubHeadingText)
 
-	logoutBtn := iconButton(theme.DeleteIcon(), func() {
-		client.Logout()
-		onLogout()
-	})
-
-	header := container.NewPadded(container.NewBorder(nil, nil, newChannelBtn,
-		container.NewHBox(themeBtn, logoutBtn), search))
+	header := container.NewPadded(container.NewBorder(nil, nil, container.NewPadded(appName),
+		container.NewHBox(newChannelBtn, iconButton(theme.MenuIcon(), onMenu)), nil))
 
 	body := container.NewStack(container.NewCenter(empty), container.NewPadded(list))
 
 	// A Border layout, not a padded box: the list has to fill the pane and
 	// take all the space the header leaves, however tall the window is.
-	return container.NewBorder(header, banner.wrap, nil, nil, body), markOpen
+	view := container.NewBorder(header, banner.wrap, nil, nil, body)
+
+	return sidebar{view: view, markOpen: markOpen, search: search}
 }
