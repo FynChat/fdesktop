@@ -6,9 +6,38 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 )
 
-const baseURL = "http://localhost:8080"
+// defaultBaseURL is used when FYNCHAT_API_URL is not set.
+const defaultBaseURL = "http://localhost:8080"
+
+// Routes served by FynChat/fynchat-backend (internal/routes/routes.go).
+// Everything that needs a JWT lives under the authenticated /api group.
+const (
+	routeLogin         = "/login"
+	routeRegister      = "/register"
+	routeChannels      = "/api/channels"
+	routeChannelCreate = "/api/channel/create"
+	routeChannelMsgs   = "/api/channels/%s/messages"
+	routeMessageCreate = "/api/message/create/%s"
+)
+
+// baseURL is the root of the FynChat backend. Set FYNCHAT_API_URL to point
+// the app at another host, e.g. FYNCHAT_API_URL=http://localhost:8000.
+//
+//	var baseURL = baseURLFromEnv()
+var baseURL = baseURLFromEnv()
+
+// baseURLFromEnv returns FYNCHAT_API_URL without a trailing slash, falling
+// back to defaultBaseURL when the variable is empty.
+func baseURLFromEnv() string {
+	if v := strings.TrimSpace(os.Getenv("FYNCHAT_API_URL")); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return defaultBaseURL
+}
 
 // Channel is a chat channel as returned by the backend.
 type Channel struct {
@@ -80,35 +109,46 @@ func (c *HTTPClient) do(method, path string, body interface{}, authenticated boo
 
 type authResponse struct {
 	AccessToken string          `json:"access_token"`
+	Token       string          `json:"token"` // fynchat-backend names it "token"
 	User        json.RawMessage `json:"user"`
+}
+
+// accessToken returns the token from the response, accepting both the
+// "access_token" field used by the API spec and the "token" field returned
+// by the current fynchat-backend handlers.
+func (r authResponse) accessToken() string {
+	if r.AccessToken != "" {
+		return r.AccessToken
+	}
+	return r.Token
 }
 
 // Login authenticates with email/password and stores the returned token.
 func (c *HTTPClient) Login(email, password string) (string, error) {
 	body := map[string]string{"email": email, "password": password}
 	var resp authResponse
-	if err := c.do(http.MethodPost, "/login", body, false, &resp); err != nil {
+	if err := c.do(http.MethodPost, routeLogin, body, false, &resp); err != nil {
 		return "", err
 	}
-	c.Token = resp.AccessToken
-	return resp.AccessToken, nil
+	c.Token = resp.accessToken()
+	return c.Token, nil
 }
 
 // Register creates a new account and stores the returned token.
 func (c *HTTPClient) Register(name, username, email, password string) (string, error) {
 	body := map[string]string{"name": name, "username": username, "email": email, "password": password}
 	var resp authResponse
-	if err := c.do(http.MethodPost, "/register", body, false, &resp); err != nil {
+	if err := c.do(http.MethodPost, routeRegister, body, false, &resp); err != nil {
 		return "", err
 	}
-	c.Token = resp.AccessToken
-	return resp.AccessToken, nil
+	c.Token = resp.accessToken()
+	return c.Token, nil
 }
 
 // ListChannels returns all channels visible to the authenticated user.
 func (c *HTTPClient) ListChannels() ([]Channel, error) {
 	var channels []Channel
-	if err := c.do(http.MethodGet, "/channels", nil, true, &channels); err != nil {
+	if err := c.do(http.MethodGet, routeChannels, nil, true, &channels); err != nil {
 		return nil, err
 	}
 	return channels, nil
@@ -118,7 +158,7 @@ func (c *HTTPClient) ListChannels() ([]Channel, error) {
 func (c *HTTPClient) CreateChannel(channelType, name, avatar string) (Channel, error) {
 	body := map[string]string{"channel_type": channelType, "name": name, "avatar_url": avatar}
 	var channel Channel
-	if err := c.do(http.MethodPost, "/channels", body, true, &channel); err != nil {
+	if err := c.do(http.MethodPost, routeChannelCreate, body, true, &channel); err != nil {
 		return Channel{}, err
 	}
 	return channel, nil
@@ -127,7 +167,7 @@ func (c *HTTPClient) CreateChannel(channelType, name, avatar string) (Channel, e
 // ListMessages returns all messages in the given channel.
 func (c *HTTPClient) ListMessages(channelID string) ([]Message, error) {
 	var messages []Message
-	if err := c.do(http.MethodGet, "/channels/"+channelID+"/messages", nil, true, &messages); err != nil {
+	if err := c.do(http.MethodGet, fmt.Sprintf(routeChannelMsgs, channelID), nil, true, &messages); err != nil {
 		return nil, err
 	}
 	return messages, nil
@@ -137,7 +177,7 @@ func (c *HTTPClient) ListMessages(channelID string) ([]Message, error) {
 func (c *HTTPClient) SendMessage(channelID, content string) (Message, error) {
 	body := map[string]string{"content": content}
 	var message Message
-	if err := c.do(http.MethodPost, "/channels/"+channelID+"/messages", body, true, &message); err != nil {
+	if err := c.do(http.MethodPost, fmt.Sprintf(routeMessageCreate, channelID), body, true, &message); err != nil {
 		return Message{}, err
 	}
 	return message, nil

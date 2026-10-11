@@ -1,0 +1,20 @@
+# Build output
+/fynchat
+/fynchat.exe
+/dist/
+/build/
+*.exe
+
+# Cross-compilation scratch dirs (fyne-cross, WSLg symlink helper)
+/fyne-cross/tmp/
+/wslg-links/
+
+# Go test output
+*.test
+*.out
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
