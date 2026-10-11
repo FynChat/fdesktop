@@ -3,7 +3,6 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
@@ -138,35 +137,15 @@ func channelsView(client *HTTPClient, prefs *Prefs, w fyne.Window, onChannelSele
 	// The header actions are icons, not labelled buttons: the header is
 	// already a title, and icons keep the row short at any window width.
 	newChannelBtn := iconButton(theme.ContentAddIcon(), func() {
-		typeEntry := widget.NewEntry()
-		typeEntry.SetPlaceHolder("group")
-		nameEntry := widget.NewEntry()
-		nameEntry.SetPlaceHolder("general")
-		avatarEntry := widget.NewEntry()
-		avatarEntry.SetPlaceHolder("https://…")
-
-		dialog.ShowForm("New channel", "Create", "Cancel", []*widget.FormItem{
-			widget.NewFormItem("Type (group, channel or p2p)", typeEntry),
-			widget.NewFormItem("Name", nameEntry),
-			widget.NewFormItem("Avatar URL", avatarEntry),
-		}, func(ok bool) {
-			if !ok {
-				return
+		newChannelDialog(w, func(kind, name, avatar string) error {
+			_, err := client.CreateChannel(kind, name, avatar)
+			if err != nil {
+				return err
 			}
 
-			go func() {
-				_, err := client.CreateChannel(typeEntry.Text, nameEntry.Text, avatarEntry.Text)
-
-				fyne.Do(func() {
-					if err != nil {
-						banner.Show(err)
-						return
-					}
-					banner.Clear()
-					load()
-				})
-			}()
-		}, w)
+			fyne.Do(load)
+			return nil
+		})
 	})
 
 	header := headerBar("Chats", newChannelBtn, themeBtn, refreshBtn, logoutBtn)

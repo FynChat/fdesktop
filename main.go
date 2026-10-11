@@ -3,6 +3,7 @@ package main
 import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"log"
 )
 
 // main creates the Fyne app, a single window, and the shared HTTPClient,
@@ -23,6 +24,19 @@ func main() {
 
 	client := NewHTTPClient()
 	client.AttachPersistence(a.Preferences())
+
+	// Demo mode serves canned data from memory and signs straight in, so the
+	// layout can be looked at without a backend.
+	demo := demoEnabled()
+	if demo {
+		url, stop := startDemoServer()
+		defer stop()
+		baseURL = url
+
+		if _, err := client.Login("demo@example.com", "demo"); err != nil {
+			log.Fatalf("demo: %v", err)
+		}
+	}
 
 	var selectedChannel Channel
 
@@ -57,9 +71,7 @@ func main() {
 	// A remembered token means we can skip the login screen. If it turned out
 	// to be expired, the channels view shows the error and its Log out button
 	// brings the user back here.
-	if client.Token == "" {
-		showLogin()
-	} else {
+	if demo || client.Token != "" {
 		showChannels()
 
 		// Reopen the channel that was open last time, if it is still there.
@@ -86,5 +98,8 @@ func main() {
 	// Big enough to read a conversation without scrolling sideways, small
 	// enough to sit next to a terminal. The window stays resizable.
 	w.Resize(fyne.NewSize(960, 680))
+	if demo {
+		w.SetTitle("FynChat — demo data")
+	}
 	w.ShowAndRun()
 }

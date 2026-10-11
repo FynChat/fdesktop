@@ -105,6 +105,8 @@ state-management library, just structs, fields and callbacks.
 | `session_test.go` | the session survives a restart and logout clears it |
 | `validate_test.go` | form validation rules |
 | `shot_test.go` | renders each view to a PNG for review (`make shots`) |
+| `dialog.go` | the new-channel modal: type picker, live avatar preview, inline errors |
+| `demo.go` | `FYNCHAT_DEMO=1` sample data, served from memory |
 | `docs/websockets.md` | Hub / client-pump / broadcast design doc (server-side) |
 
 Navigation is done by passing callbacks. `main.go` owns the transitions:
@@ -149,6 +151,19 @@ sudo pacman -S base-devel pkgconf mesa wayland libxkbcommon libx11 libxcursor li
 
 - **A running `fynchat-backend`** (see the repo link above). Without it the app
   starts but every request fails with a connection error dialog.
+
+## Demo mode
+
+To look at the UI without a backend, a database or an account:
+
+```bash
+FYNCHAT_DEMO=1 go run .
+```
+
+It starts an in-process server that answers the same routes the real backend
+does, with sample channels and a conversation long enough to show grouping,
+date separators, both bubble styles and a wrapped message. The app takes the
+same code path as with a real backend — nothing is mocked inside the views.
 
 ## Getting started
 
