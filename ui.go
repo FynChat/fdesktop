@@ -219,8 +219,8 @@ func iconButton(icon fyne.Resource, onTapped func()) *widget.Button {
 func asyncButton(label, busyLabel string, run func()) *widget.Button {
 	b := widget.NewButton(label, nil)
 	b.OnTapped = func() {
-		if !b.Disabled() {
-			return
+		if b.Disabled() {
+			return // a run is already in flight
 		}
 		b.Disable()
 		b.SetText(busyLabel)
