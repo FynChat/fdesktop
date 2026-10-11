@@ -1,8 +1,16 @@
-package main
+//go:build screenshot
 
-// TEMPORARY: renders each view offscreen with the Fyne software driver and
-// writes PNGs, so the UI can be inspected without opening a window.
-// Deleted after inspection.
+// Renders each view offscreen with the Fyne software driver and writes PNGs,
+// so the UI can be reviewed without opening a window.
+//
+//	go run -tags screenshot .   is not how this runs: use `make shots`.
+//
+// It is behind a build tag on purpose. Fyne's test driver runs fyne.Do inline
+// instead of queueing it to the main thread, so the goroutines these views
+// start really do touch the UI concurrently with the test: the race detector
+// fires even though the production code is correct.
+
+package main
 
 import (
 	"image"
@@ -88,9 +96,10 @@ func TestRenderViews(t *testing.T) {
 	capture(t, "shot-login.png", loginView(client, test.NewWindow(nil), func() {}, func() {}))
 	capture(t, "shot-register.png", registerView(client, test.NewWindow(nil), func() {}, func() {}))
 
-	ch := channelsView(client, test.NewWindow(nil), func(Channel) {}, func() {})
+	prefs := NewPrefs(app.Preferences())
+	ch := channelsView(client, prefs, test.NewWindow(nil), func(Channel) {}, func() {})
 	capture(t, "shot-channels.png", ch)
 
-	cv := chatView(client, test.NewWindow(nil), "1bbf2de4-afd9-428e-abbc-18091cb6dd4e", "general", func() {})
+	cv := chatView(client, prefs, test.NewWindow(nil), "1bbf2de4-afd9-428e-abbc-18091cb6dd4e", "general", func() {})
 	capture(t, "shot-chat.png", cv)
 }

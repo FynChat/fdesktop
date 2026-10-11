@@ -9,7 +9,7 @@ BINARY := fynchat
 GO     ?= go
 PKG    := .
 
-.PHONY: all build run test race cover fmt fmt-check vet tidy deps clean cross-windows cross-darwin help
+.PHONY: all build run test race cover fmt fmt-check vet tidy deps clean cross-windows cross-darwin shots help
 
 all: build
 
@@ -64,6 +64,10 @@ cross-windows:
 ## cross-darwin: cross compile for macOS (needs fyne-cross)
 cross-darwin:
 	fyne-cross -os darwin $(BINARY).app
+
+## shots: render each view to a PNG for review (needs a display-less run)
+shots:
+	$(GO) test -tags screenshot -run TestRenderViews ./...
 
 ## clean: remove build output
 clean:

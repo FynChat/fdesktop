@@ -11,8 +11,12 @@ import (
 //	Login ⇄ Register → Channels → Chat
 //	Chat --Back--> Channels --Logout--> Login
 func main() {
-	a := app.New()
-	a.Settings().SetTheme(newTelegramTheme())
+	// NewWithID, not New: the Preferences API refuses to store anything
+	// without a unique app ID, which would silently break session persistence.
+	a := app.NewWithID("com.fynchat.desktop")
+
+	prefs := NewPrefs(a.Preferences())
+	prefs.apply() // restore the theme chosen last time
 
 	w := a.NewWindow("FynChat")
 	w.SetIcon(appIcon())
@@ -31,23 +35,54 @@ func main() {
 		w.SetContent(registerView(client, w, showChannels, showLogin))
 	}
 	showChannels = func() {
-		w.SetContent(channelsView(client, w, func(ch Channel) {
+		w.SetContent(channelsView(client, prefs, w, func(ch Channel) {
 			selectedChannel = ch
 			showChat()
 		}, showLogin))
 	}
 	showChat = func() {
-		w.SetContent(chatView(client, w, selectedChannel.ID, selectedChannel.ChannelName, showChannels))
+		w.SetContent(chatView(client, prefs, w,
+			selectedChannel.ID, selectedChannel.ChannelName, showChannels))
 	}
+
+	// An expired token would otherwise fail every request with a dialog. The
+	// client tells us once, and we drop back to the login screen.
+	client.SetSessionExpiredHandler(func() {
+		fyne.Do(func() {
+			client.Logout()
+			showLogin()
+		})
+	})
 
 	// A remembered token means we can skip the login screen. If it turned out
 	// to be expired, the channels view shows the error and its Log out button
 	// brings the user back here.
-	if client.Token != "" {
-		showChannels()
-	} else {
+	if client.Token == "" {
 		showLogin()
+	} else {
+		showChannels()
+
+		// Reopen the channel that was open last time, if it is still there.
+		if last := prefs.LastChannel(); last != "" {
+			go func() {
+				channels, err := client.ListChannels()
+
+				fyne.Do(func() {
+					if err != nil {
+						return
+					}
+					for _, ch := range channels {
+						if ch.ID == last {
+							selectedChannel = ch
+							showChat()
+							return
+						}
+					}
+				})
+			}()
+		}
 	}
+
 	// Big enough to read a conversation without scrolling sideways, small
 	// enough to sit next to a terminal. The window stays resizable.
 	w.Resize(fyne.NewSize(960, 680))

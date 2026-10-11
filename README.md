@@ -39,17 +39,33 @@ FCP lands — see [Roadmap](#roadmap).
 
 ## Features
 
-- **Register / login** — email + password, JWT stored in the shared client.
-- **Channel list** — scrollable list, create a channel with a type, name and
-  avatar URL, refresh after creation.
-- **Chat view** — message history, send with the button or `Enter`, live
-  messages pushed over a WebSocket.
-- **Logout** — clears the token and returns to the login view.
-- **Single window, view swapping** — `Login ⇄ Register → Channels → Chat`.
+- **Register / login** — checked in the form before anything is sent, JWT stored
+  in the shared client.
+- **Channel list** — avatars, channel type, create a channel, pull to refresh.
+- **Chat view** — history as bubbles with sender and time, own messages on the
+  right, consecutive messages grouped, date separators, live push over a
+  WebSocket when the backend exposes one.
+- **Dark and light** — the palette icon in the header switches, and the choice
+  is remembered.
+- **Stays where you left off** — the session, the last channel and the theme
+  are stored in the app preferences, so the app reopens on the channel you had
+  open instead of the login form.
+- **Session expiry** — a rejected token drops you back to the login screen
+  once, instead of failing every action with a dialog.
+- **One window, view swapping** — `Login ⇄ Register → Channels → Chat`.
 - **Correct threading** — every HTTP call runs on a goroutine and every UI
   mutation goes through `fyne.Do`.
 - **Configurable backend URL** — point the app at any host with
   `FYNCHAT_API_URL` instead of editing code.
+
+### Details worth knowing
+
+- **Errors use a banner, not a dialog.** A failed send leaves your text in the
+  box so you can retry instead of retyping.
+- **Buttons lock while a request is in flight**, so a double click cannot send
+  the same message twice.
+- **The scroll only follows new messages when you are already at the bottom.**
+  Reading older messages is not interrupted by someone talking.
 
 ## Screens
 
@@ -86,6 +102,9 @@ state-management library, just structs, fields and callbacks.
 | `channels.go` | `channelsView(...)` — channel list, new-channel dialog, logout |
 | `chat.go` | `chatView(...)` — history, composer, WebSocket live messages |
 | `httpclient_test.go` | `httptest`-based tests for every HTTP method |
+| `session_test.go` | the session survives a restart and logout clears it |
+| `validate_test.go` | form validation rules |
+| `shot_test.go` | renders each view to a PNG for review (`make shots`) |
 | `docs/websockets.md` | Hub / client-pump / broadcast design doc (server-side) |
 
 Navigation is done by passing callbacks. `main.go` owns the transitions:
@@ -249,6 +268,12 @@ ok  	fynchat	1.034s
 ```
 
 `gofmt -l .` and `go vet ./...` are clean.
+
+`make shots` renders every view to a PNG with the Fyne software driver, which
+is how the UI gets reviewed without opening a window. It sits behind a
+`screenshot` build tag because Fyne's test driver runs `fyne.Do` inline rather
+than queueing it, so the race detector fires on the harness even though the
+app is correct.
 
 ## Cross-compiling
 

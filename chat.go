@@ -14,7 +14,6 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -24,8 +23,14 @@ import (
 // chatView builds the chat screen for one channel. It shows the channel name
 // in a header, the message history as bubbles, and a composer pinned to the
 // bottom. onBack returns to the channel list.
-func chatView(client *HTTPClient, w fyne.Window, channelID, channelName string, onBack func()) fyne.CanvasObject {
+func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channelName string, onBack func()) fyne.CanvasObject {
 	messagesBox := container.NewVBox()
+	banner := errorBannerWidget()
+
+	// Remember this channel so the app can reopen it next launch.
+	if prefs != nil {
+		prefs.SetLastChannel(channelID)
+	}
 
 	// A short conversation should sit at the bottom of the window, not float
 	// at the top like a list of files: the spacer above expands first and
@@ -33,11 +38,23 @@ func chatView(client *HTTPClient, w fyne.Window, channelID, channelName string, 
 	anchored := container.NewVBox(layout.NewSpacer(), messagesBox)
 	scroll := container.NewVScroll(anchored)
 
+	// nearBottom reports whether the newest messages are already in view.
+	// Auto-scrolling on every arrival yanks you down while you are reading
+	// history, so the view only follows when you are already at the end.
+	nearBottom := func() bool {
+		offset := scroll.Offset.Y
+		height := scroll.Size().Height
+		content := scroll.Content.MinSize().Height
+		return content-(offset+height) < scrollThreshold
+	}
+
 	// Refresh the parent, not messagesBox: messages are laid out by the
 	// anchored VBox, so refreshing the inner box alone never resizes it.
-	refresh := func() {
+	refresh := func(follow bool) {
 		anchored.Refresh()
-		scroll.ScrollToBottom()
+		if follow {
+			scroll.ScrollToBottom()
+		}
 	}
 
 	// rendered tracks the message IDs already on screen. A message arrives
@@ -47,39 +64,44 @@ func chatView(client *HTTPClient, w fyne.Window, channelID, channelName string, 
 
 	// appendMessage adds one message, skipping IDs that are already shown.
 	appendMessage := func(m Message) {
-		key := m.ID
-		if key == "" {
-			key = m.Content + "|" + m.CreatedAt
-		}
+		key := messageKey(m)
 		if rendered[key] {
 			return
 		}
 		rendered[key] = true
 		messagesBox.Add(messageRow(m, client.UserID, false))
-		refresh()
+		refresh(nearBottom())
 	}
 
 	// render replaces the messages with the given history and scrolls to the
 	// bottom, so the newest message is the one you see.
 	render := func(messages []Message) {
 		messagesBox.RemoveAll()
+
+		// Record every id up front: the rows are grouped and split by
+		// buildMessageRows, and a later live push of the same message must
+		// still be recognised as one already on screen.
 		rendered = make(map[string]bool)
-		rows := buildMessageRows(messages, client.UserID)
-		for _, row := range rows {
+		for _, m := range messages {
+			rendered[messageKey(m)] = true
+		}
+		for _, row := range buildMessageRows(messages, client.UserID) {
 			messagesBox.Add(row)
 		}
-		refresh()
+		refresh(true)
 	}
 
 	// load fetches messages for this channel from the backend.
 	load := func() {
 		go func() {
 			messages, err := client.ListMessages(channelID)
+
 			fyne.Do(func() {
 				if err != nil {
-					dialog.ShowError(err, w)
+					banner.Show(err)
 					return
 				}
+				banner.Clear()
 				render(messages)
 			})
 		}()
@@ -116,44 +138,82 @@ func chatView(client *HTTPClient, w fyne.Window, channelID, channelName string, 
 		}
 	}()
 
-	entry := widget.NewEntry()
+	// A multi-line composer, like Telegram's: Enter starts a new line and
+	// Ctrl+Enter sends. A single-line entry cannot hold a paragraph and it is
+	// the main thing people notice when chatting.
+	entry := widget.NewMultiLineEntry()
 	entry.SetPlaceHolder("Message")
 	entry.Wrapping = fyne.TextWrapWord
+	entry.SetMinRowsVisible(1)
 
-	// send delivers the typed message and refreshes the list.
+	sending := widget.NewButtonWithIcon("", theme.MailSendIcon(), nil)
+	sending.Importance = widget.HighImportance
+
+	// send delivers the typed message and reloads the history.
 	send := func() {
 		content := strings.TrimSpace(entry.Text)
-		if content == "" {
+		if content == "" || sending.Disabled() {
 			return
 		}
+		sending.Disable()
+
 		go func() {
 			_, err := client.SendMessage(channelID, content)
+
 			fyne.Do(func() {
+				sending.Enable()
 				if err != nil {
-					dialog.ShowError(err, w)
+					// Keep the text: the user can retry instead of
+					// retyping what they just wrote.
+					banner.Show(err)
 					return
 				}
 				entry.SetText("")
+				banner.Clear()
 				load()
 			})
 		}()
 	}
 
-	sendBtn := widget.NewButtonWithIcon("", theme.MailSendIcon(), send)
-	sendBtn.Importance = widget.HighImportance
+	sending.OnTapped = send
 	entry.OnSubmitted = func(string) { send() }
 
 	// Telegram uses a bare arrow rather than a labelled button.
-	backBtn := widget.NewButtonWithIcon("", theme.NavigateBackIcon(), func() {
+	backBtn := iconButton(theme.NavigateBackIcon(), func() {
 		cancelWS()
 		onBack()
 	})
-	backBtn.Importance = widget.LowImportance
 
-	header := headerBar(channelName, backBtn)
-	composer := container.NewBorder(nil, nil, nil, sendBtn, container.NewPadded(entry))
+	refreshBtn := iconButton(theme.ViewRefreshIcon(), func() {
+		banner.Clear()
+		load()
+	})
+
+	themeBtn := iconButton(theme.ColorPaletteIcon(), func() {
+		if prefs == nil {
+			return
+		}
+		prefs.SetDarkTheme(!prefs.DarkTheme())
+		prefs.apply()
+	})
+
+	header := headerBar(channelName, themeBtn, refreshBtn, backBtn)
+	composer := container.NewBorder(nil, banner.wrap, nil, sending, container.NewPadded(entry))
 
 	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll))
+}
+
+// scrollThreshold is how close to the end counts as "at the bottom", in
+// pixels. A little slack means a slightly shorter window still counts.
+const scrollThreshold = 48
+
+// messageKey identifies a message for the de-duplication map, falling back to
+// content when the backend sends no id.
+func messageKey(m Message) string {
+	if m.ID != "" {
+		return m.ID
+	}
+	return m.Content + "|" + m.CreatedAt
 }
 
 // buildMessageRows turns a history into display rows. Telegram inserts a date
@@ -183,7 +243,7 @@ func daySeparator(day string) fyne.CanvasObject {
 	text := canvas.NewText(day, theme.PlaceHolderColor())
 	text.TextSize = theme.Size(theme.SizeNameCaptionText)
 
-	pill := canvas.NewRectangle(color.NRGBA{R: 0x1F, G: 0x2C, B: 0x3D, A: 0xff})
+	pill := canvas.NewRectangle(pillBackground())
 	pill.CornerRadius = 8
 	pill.SetMinSize(fyne.NewSize(90, 22))
 
@@ -274,19 +334,10 @@ func messageRow(m Message, myUserID int, grouped bool) fyne.CanvasObject {
 // bubbleColor picks the fill for a message bubble: accent for your own
 // messages, a quiet panel colour for everyone else's.
 func bubbleColor(mine bool) color.Color {
-	light := fyne.CurrentApp() != nil &&
-		fyne.CurrentApp().Settings().ThemeVariant() == theme.VariantLight
-
-	switch {
-	case mine && light:
-		return color.NRGBA{R: 0xD6, G: 0xE9, B: 0xFC, A: 0xff}
-	case mine:
-		return accentDark
-	case light:
-		return lightBubble
-	default:
-		return darkBubble
+	if mine {
+		return outgoingBubble()
 	}
+	return incomingBubble()
 }
 
 // messageTime formats the RFC3339 timestamp the backend sends, returning ""

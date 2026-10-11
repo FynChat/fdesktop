@@ -57,14 +57,21 @@ func (r *channelRow) update(ch Channel) {
 // backend, lets the user create new channels, select one to open its chat,
 // or log out. onChannelSelected is called with the selected channel on click,
 // onLogout is called after the token is cleared.
-func channelsView(client *HTTPClient, w fyne.Window, onChannelSelected func(channel Channel), onLogout func()) fyne.CanvasObject {
+func channelsView(client *HTTPClient, prefs *Prefs, w fyne.Window, onChannelSelected func(channel Channel), onLogout func()) fyne.CanvasObject {
 	var channels []Channel
+	banner := errorBannerWidget()
 
 	// The row stays a plain *fyne.Container on purpose: the canvas walks
 	// children by type-asserting to that exact type, so a struct of our own
 	// that embeds one reports the right size but paints nothing. The widgets
 	// are therefore looked up by pointer instead of through nesting.
 	rows := map[*fyne.Container]*channelRow{}
+
+	// Empty state, shown while the first load is in flight or when the user
+	// has no channels yet.
+	empty := widget.NewLabel("Loading your chats…")
+	empty.Alignment = fyne.TextAlignCenter
+	empty.Importance = widget.LowImportance
 
 	list := widget.NewList(
 		func() int { return len(channels) },
@@ -88,61 +95,82 @@ func channelsView(client *HTTPClient, w fyne.Window, onChannelSelected func(chan
 	}
 
 	// load fetches the channel list from the backend and refreshes the list.
-	// Errors are shown in a dialog.
 	load := func() {
 		go func() {
 			chs, err := client.ListChannels()
+
 			fyne.Do(func() {
 				if err != nil {
-					dialog.ShowError(err, w)
+					banner.Show(err)
 					return
 				}
+				banner.Clear()
 				channels = chs
 				list.Refresh()
+				empty.Hide()
+				if len(channels) > 0 {
+					list.Show()
+				}
 			})
 		}()
 	}
 	load()
 
 	// logoutBtn clears the auth token and returns to the login view.
-	logoutBtn := widget.NewButtonWithIcon("", theme.DeleteIcon(), func() {
+	logoutBtn := iconButton(theme.DeleteIcon(), func() {
 		client.Logout()
 		onLogout()
 	})
-	logoutBtn.Importance = widget.LowImportance
 
-	// The two header actions are icons, not labelled buttons: the header is
+	themeBtn := iconButton(theme.ColorPaletteIcon(), func() {
+		if prefs == nil {
+			return
+		}
+		prefs.SetDarkTheme(!prefs.DarkTheme())
+		prefs.apply()
+	})
+
+	refreshBtn := iconButton(theme.ViewRefreshIcon(), func() {
+		banner.Clear()
+		load()
+	})
+
+	// The header actions are icons, not labelled buttons: the header is
 	// already a title, and icons keep the row short at any window width.
-	newChannelBtn := widget.NewButtonWithIcon("", theme.ContentAddIcon(), func() {
+	newChannelBtn := iconButton(theme.ContentAddIcon(), func() {
 		typeEntry := widget.NewEntry()
-		typeEntry.SetPlaceHolder("text")
+		typeEntry.SetPlaceHolder("group")
 		nameEntry := widget.NewEntry()
 		nameEntry.SetPlaceHolder("general")
 		avatarEntry := widget.NewEntry()
 		avatarEntry.SetPlaceHolder("https://…")
+
 		dialog.ShowForm("New channel", "Create", "Cancel", []*widget.FormItem{
-			widget.NewFormItem("Type", typeEntry),
+			widget.NewFormItem("Type (group, channel or p2p)", typeEntry),
 			widget.NewFormItem("Name", nameEntry),
 			widget.NewFormItem("Avatar URL", avatarEntry),
 		}, func(ok bool) {
 			if !ok {
 				return
 			}
+
 			go func() {
 				_, err := client.CreateChannel(typeEntry.Text, nameEntry.Text, avatarEntry.Text)
+
 				fyne.Do(func() {
 					if err != nil {
-						dialog.ShowError(err, w)
+						banner.Show(err)
 						return
 					}
+					banner.Clear()
 					load()
 				})
 			}()
 		}, w)
 	})
-	newChannelBtn.Importance = widget.LowImportance
 
-	header := headerBar("Chats", newChannelBtn, logoutBtn)
+	header := headerBar("Chats", newChannelBtn, themeBtn, refreshBtn, logoutBtn)
+	body := container.NewStack(container.NewCenter(empty), container.NewPadded(list))
 
-	return container.NewBorder(header, nil, nil, nil, container.NewPadded(list))
+	return container.NewBorder(header, banner.wrap, nil, nil, body)
 }
