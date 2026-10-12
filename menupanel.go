@@ -10,6 +10,7 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
 // menuWidth is how wide the side menu slides out.
@@ -24,9 +25,15 @@ type sideMenu struct {
 	open    bool
 	anim    *fyne.Animation
 	onClose func()
+
+	// searchSlot holds the channel search box. It is emptied while the
+	// Contacts screen is up, where a box labelled "Search channels" would be
+	// searching something that is not on screen.
+	searchSlot *fyne.Container
+	search     *widget.Entry
 }
 
-func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClose func()) *sideMenu {
+func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClose func(), onContacts func()) *sideMenu {
 	name := client.Name
 	if name == "" {
 		name = "Your account"
@@ -53,6 +60,17 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		themeItem.SetNote(themeNote(prefs))
 	})
 
+	// Contacts and the two ways of making a conversation sit above the
+	// settings, which is where Telegram keeps them too.
+	contacts := newMenuItem(theme.AccountIcon(), "Contacts", "", func() {
+		if onContacts != nil {
+			onContacts()
+		}
+	})
+	newGroup := newMenuItem(theme.FolderNewIcon(), "New group", "", func() {
+		comingSoon("New group")
+	})
+
 	privacy := newMenuItem(theme.VisibilityIcon(), "Privacy and security", "", func() {
 		comingSoon("Privacy and security")
 	})
@@ -64,13 +82,16 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		onLogout()
 	})
 
+	// The search box lives here now, where it has the full width of the menu
+	// instead of crowding the list header.
+	searchSlot := container.NewVBox(container.NewPadded(side.search))
+
 	panel := container.NewStack(
 		canvas.NewRectangle(panelBackground()),
 		container.NewVBox(
 			container.NewPadded(account),
-			// The search box lives here now, where it has the full width of
-			// the menu instead of crowding the list header.
-			container.NewPadded(side.search),
+			searchSlot,
+			contacts, newGroup,
 			sectionLabel("Settings"),
 			themeItem, privacy, settings,
 			layout.NewSpacer(),
@@ -78,7 +99,26 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		),
 	)
 
-	return &sideMenu{panel: panel, onClose: onClose}
+	return &sideMenu{
+		panel:      panel,
+		onClose:    onClose,
+		searchSlot: searchSlot,
+		search:     side.search,
+	}
+}
+
+// showChannelSearch puts the channel search box in the menu or takes it out.
+//
+// The box is swapped rather than hidden: Fyne 2.8 crashes the painter when an
+// Entry inside a container is hidden and shown again, because it is never laid
+// out while hidden and its border is then stroked at a negative radius.
+func (m *sideMenu) showChannelSearch(visible bool) {
+	if visible {
+		m.searchSlot.Objects = []fyne.CanvasObject{container.NewPadded(m.search)}
+	} else {
+		m.searchSlot.Objects = nil
+	}
+	m.searchSlot.Refresh()
 }
 
 // themeNote spells out what is selected rather than leaving a switch to guess.

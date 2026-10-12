@@ -70,6 +70,7 @@ const (
 	routeChannelCreate = "/api/channel/create"
 	routeChannelMsgs   = "/api/channels/%s/messages"
 	routeMessageCreate = "/api/message/create/%s"
+	routeContacts      = "/api/contacts"
 )
 
 // baseURL is the root of the FynChat backend. Set FYNCHAT_API_URL to point
@@ -102,6 +103,14 @@ type Message struct {
 	SenderID  int    `json:"sender_id"`
 	Content   string `json:"content"`
 	CreatedAt string `json:"created_at"`
+}
+
+// Contact is a person who can be started off in a private chat.
+type Contact struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Username string `json:"username"`
+	Avatar   string `json:"avatar_url"`
 }
 
 // HTTPClient talks to the FynChat backend. It holds the auth token used
@@ -287,7 +296,8 @@ func (c *HTTPClient) ListChannels() ([]Channel, error) {
 	return channels, nil
 }
 
-// CreateChannel creates a new channel and returns it.
+// CreateChannel creates a named channel: a group or a broadcast. A private
+// chat is not created here — it comes from a contact, see OpenPrivateChat.
 func (c *HTTPClient) CreateChannel(channelType, name, avatar string) (Channel, error) {
 	body := map[string]string{"channel_type": channelType, "name": name, "avatar_url": avatar}
 	var channel Channel
@@ -295,6 +305,47 @@ func (c *HTTPClient) CreateChannel(channelType, name, avatar string) (Channel, e
 		return Channel{}, err
 	}
 	return channel, nil
+}
+
+// OpenPrivateChat returns the private chat with the given person, creating it
+// if it does not exist yet.
+//
+// It is deliberately a "get or create" rather than a plain create, because a
+// private chat is identified by the pair of people in it: there can only ever
+// be one, and asking for it twice must not make two. The backend decides which
+// of the two happened; the client only cares about the channel that comes back.
+func (c *HTTPClient) OpenPrivateChat(peerID int) (Channel, error) {
+	body := map[string]interface{}{"channel_type": "p2p", "peer_id": peerID}
+
+	var channel Channel
+	if err := c.do(http.MethodPost, routeChannelCreate, body, true, &channel); err != nil {
+		return Channel{}, err
+	}
+	return channel, nil
+}
+
+// AddContact adds someone to the user's contacts.
+//
+// The handle is what identifies them, not a display name: the backend has to
+// resolve it to a real account, and picking a name is how you end up with two
+// contacts for one person.
+func (c *HTTPClient) AddContact(username string) (Contact, error) {
+	body := map[string]string{"username": username}
+
+	var contact Contact
+	if err := c.do(http.MethodPost, routeContacts, body, true, &contact); err != nil {
+		return Contact{}, err
+	}
+	return contact, nil
+}
+
+// ListContacts returns the people who can be started off in a private chat.
+func (c *HTTPClient) ListContacts() ([]Contact, error) {
+	var contacts []Contact
+	if err := c.do(http.MethodGet, routeContacts, nil, true, &contacts); err != nil {
+		return nil, err
+	}
+	return contacts, nil
 }
 
 // ListMessages returns all messages in the given channel.
