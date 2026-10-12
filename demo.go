@@ -42,6 +42,14 @@ func startDemoServer() (string, func()) {
 		demoMessage("m7", demoChannelGeneral, 1, "ready to ship it", now.Add(50*time.Minute)),
 	}
 
+	// Contacts the private-chat picker offers. The demo user is Ada, so these
+	// are the people she can start a private chat with.
+	contacts := []map[string]any{
+		{"id": 2, "name": "Grace Hopper", "username": "amazing", "avatar_url": ""},
+		{"id": 3, "name": "Alan Turing", "username": "turing", "avatar_url": ""},
+		{"id": 4, "name": "Katherine Johnson", "username": "kj", "avatar_url": ""},
+	}
+
 	mux := http.NewServeMux()
 	writeJSON := func(w http.ResponseWriter, body any) {
 		w.Header().Set("Content-Type", "application/json")
@@ -64,8 +72,78 @@ func startDemoServer() (string, func()) {
 		writeJSON(w, channels)
 	})
 	mux.HandleFunc("/api/channel/create", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ChannelType string `json:"channel_type"`
+			Name        string `json:"name"`
+			AvatarURL   string `json:"avatar_url"`
+			PeerID      int    `json:"peer_id"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		// A private chat is get-or-create, exactly as the real backend must
+		// be: there can only ever be one chat with a given person, so asking
+		// twice hands back the same channel instead of making a second.
+		if body.ChannelType == "p2p" {
+			name := ""
+			for _, c := range contacts {
+				if c["id"] == body.PeerID {
+					name = c["name"].(string)
+					break
+				}
+			}
+
+			for _, ch := range channels {
+				if ch["channel_type"] == "p2p" && ch["channel_name"] == name {
+					writeJSON(w, ch)
+					return
+				}
+			}
+
+			ch := map[string]any{
+				"id":             fmt.Sprintf("dm-%d", body.PeerID),
+				"channel_name":   name,
+				"channel_avatar": "",
+				"channel_type":   "p2p",
+			}
+			channels = append(channels, ch)
+			w.WriteHeader(http.StatusCreated)
+			writeJSON(w, ch)
+			return
+		}
+
 		w.WriteHeader(http.StatusCreated)
-		writeJSON(w, map[string]string{"channel_name": "general", "channel_avatar": ""})
+		writeJSON(w, map[string]string{"channel_name": body.Name, "channel_avatar": body.AvatarURL})
+	})
+	mux.HandleFunc("/api/contacts", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, contacts)
+			return
+		}
+
+		var body struct {
+			Username string `json:"username"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		for _, c := range contacts {
+			if c["username"] == body.Username {
+				w.WriteHeader(http.StatusConflict)
+				writeJSON(w, map[string]string{"error": "already in your contacts"})
+				return
+			}
+		}
+
+		// The handle is given, so the display name is the backend's to make —
+		// the same split the real API has.
+		contact := map[string]any{
+			"id":         100 + len(contacts),
+			"name":       strings.Title(body.Username),
+			"username":   body.Username,
+			"avatar_url": "",
+		}
+		contacts = append(contacts, contact)
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, contact)
 	})
 	mux.HandleFunc("/api/channel/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"channel_name": "general", "channel_avatar": ""})

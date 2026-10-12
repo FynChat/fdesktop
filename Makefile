@@ -66,14 +66,18 @@ cross-darwin:
 	fyne-cross -os darwin $(BINARY).app
 
 ## shots: render each view to a PNG for review
-# Fyne's test driver runs fyne.Do inline, so the loaders shape text while the
-# capture thread renders, and the shared font cache can be corrupted. It is a
-# test-driver artefact — the app renders on one thread — so this retries.
+# Fyne's test driver runs fyne.Do inline, so background loaders mutate widgets
+# on their own goroutines and two renders can overlap — which crashes layout or
+# the font shaper. It is a test-driver artefact: the app itself renders on one
+# thread. GOMAXPROCS=1 shrinks the window for that overlap a lot (the crash
+# disappears in most runs), and the retries cover the rest.
 shots:
-	@for i in 1 2 3 4 5; do \
-	  $(GO) test -tags screenshot -run TestRenderViews -count=1 ./... && break; \
+	@ok=0; \
+	for i in 1 2 3 4 5; do \
+	  if GOMAXPROCS=1 $(GO) test -tags screenshot -run TestRenderViews -count=1 ./...; then ok=1; break; fi; \
 	  echo "retry $$i/5"; sleep 1; \
-	done; true
+	done; \
+	[ $$ok -eq 1 ]
 
 ## clean: remove build output
 clean:

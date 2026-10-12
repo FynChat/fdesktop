@@ -21,6 +21,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/test"
+	"fyne.io/fyne/v2/widget"
 )
 
 func fakeBackend() *httptest.Server {
@@ -51,6 +52,14 @@ func fakeBackend() *httptest.Server {
 	mux.HandleFunc("/api/channel/", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"channel_name":"general","channel_avatar":""}`))
 	})
+	mux.HandleFunc("/api/contacts", func(w http.ResponseWriter, r *http.Request) {
+		record()
+		w.Write([]byte(`[
+			{"id":2,"name":"Grace Hopper","username":"amazing","avatar_url":""},
+			{"id":3,"name":"Alan Turing","username":"turing","avatar_url":""},
+			{"id":4,"name":"Katherine Johnson","username":"kj","avatar_url":""}
+		]`))
+	})
 	mux.HandleFunc("/api/channels/", func(w http.ResponseWriter, r *http.Request) {
 		record()
 		w.Write([]byte(`[
@@ -71,7 +80,9 @@ func fakeBackend() *httptest.Server {
 var fakeHits atomic.Int32
 
 // waitForRequests blocks until the fake backend has seen at least n requests,
-// so two loaders never shape text at the same time.
+// then gives the loaders a moment to finish the widget updates their responses
+// trigger. The shots target also pins GOMAXPROCS to 1, which is what keeps the
+// two renders from genuinely overlapping — see the Makefile comment.
 func waitForRequests(t *testing.T, n int32) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -113,6 +124,15 @@ func TestRenderViews(t *testing.T) {
 	defer app.Quit()
 	app.Settings().SetTheme(newTelegramTheme())
 
+	// Warm the font stack before rendering anything. In a fresh test app the
+	// first string measurement can crash inside walkString on a cold cache,
+	// which has nothing to do with the view being captured and everything to
+	// do with this being the process's first text.
+	warm := test.NewWindow(widget.NewLabel("FynChat"))
+	warm.Resize(fyne.NewSize(300, 100))
+	warm.Canvas().Capture()
+	warm.Close()
+
 	client := NewHTTPClient()
 	client.Token = "test-token"
 	client.UserID = 1
@@ -127,13 +147,12 @@ func TestRenderViews(t *testing.T) {
 	// The shell with nothing open yet, and with a chat open. One window for
 	// both: the same content object cannot be shown in a second window.
 	layout, openChat := shell(client, prefs, w, func() {})
-	waitForRequests(t, 1) // the channel list has arrived
 
 	shellWin := test.NewWindow(layout)
 	shellWin.Resize(fyne.NewSize(1000, 680))
-	time.Sleep(300 * time.Millisecond)
 
 	snap := func(name string) {
+		time.Sleep(300 * time.Millisecond)
 		f, err := os.Create(name)
 		if err != nil {
 			t.Fatal(err)
@@ -145,6 +164,9 @@ func TestRenderViews(t *testing.T) {
 		t.Logf("wrote %s", name)
 	}
 
+	// The channel list loader runs first and must finish before the chat
+	// loader starts: two renders at once is what crashes the test driver.
+	waitForRequests(t, 1)
 	snap("shot-shell-empty.png")
 
 	openChat(Channel{
@@ -154,4 +176,44 @@ func TestRenderViews(t *testing.T) {
 	})
 	waitForRequests(t, 2) // the message history has arrived
 	snap("shot-shell-chat.png")
+
+	dialogWin := test.NewWindow(nil)
+	defer dialogWin.Close()
+	dialogWin.Resize(fyne.NewSize(1000, 680))
+
+	// The two dialogs and the Contacts screen. Each goes in its own window:
+	// a window shows one content object, and the dialogs are overlays on top.
+	newChannelDialog(dialogWin, func(kind, name, avatar string) error { return nil })
+	snapIn(t, dialogWin, "shot-dialog-channel.png")
+
+	contactWin := test.NewWindow(nil)
+	defer contactWin.Close()
+	contactWin.Resize(fyne.NewSize(1000, 680))
+	addContactDialog(contactWin, func(username string) error { return nil })
+	snapIn(t, contactWin, "shot-dialog-contact.png")
+
+	// The Contacts screen loads its list off a goroutine, so wait for the
+	// request before capturing.
+	contactsWin := test.NewWindow(contactsView(client, w, func(Channel) {}, func() {}))
+	defer contactsWin.Close()
+	contactsWin.Resize(fyne.NewSize(420, 680))
+	waitForRequests(t, 3)
+	snapIn(t, contactsWin, "shot-contacts.png")
+}
+
+// snapIn writes a window's canvas to a PNG.
+func snapIn(t *testing.T, win fyne.Window, name string) {
+	t.Helper()
+
+	time.Sleep(300 * time.Millisecond)
+
+	f, err := os.Create(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, win.Canvas().Capture()); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wrote %s", name)
 }

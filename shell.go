@@ -44,16 +44,48 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 		openChat(ch)
 	}
 
+	// The left pane shows one screen at a time — the chat list or the contacts.
+	//
+	// The two screens are SWAPPED rather than shown and hidden. Fyne 2.8
+	// crashes the painter when an Entry lives inside a container that was built
+	// hidden and revealed later (the entry is never laid out, so its border is
+	// stroked at a negative radius), and both screens contain an Entry. Putting
+	// in only what should be on screen avoids the whole problem — and it is
+	// what the type picker in the new-channel dialog does too.
+	pane := container.NewStack()
+
+	showChats := func() {
+		pane.Objects = []fyne.CanvasObject{side.view}
+		pane.Refresh()
+		if menu != nil {
+			menu.showChannelSearch(true)
+		}
+	}
+	showContacts := func() {
+		pane.Objects = []fyne.CanvasObject{
+			contactsView(client, w, func(ch Channel) {
+				showChats()
+				side.markOpen(ch)
+				openChat(ch)
+			}, showChats),
+		}
+		pane.Refresh()
+		if menu != nil {
+			menu.showChannelSearch(false)
+		}
+	}
+
 	side = sidebarView(client, prefs, w, onSelect, onLogout, func() {
 		menu.toggle(w.Canvas().Size())
 	})
+	showChats()
 
-	menu = newSideMenu(client, prefs, side, onLogout, nil)
+	menu = newSideMenu(client, prefs, side, onLogout, nil, showContacts)
 	menu.scrim = menu.scrimFor()
 
 	// A draggable split, like the divider in Telegram Desktop: the list keeps
 	// roughly a third of the window and both sides can be resized.
-	split := container.NewHSplit(side.view, content)
+	split := container.NewHSplit(pane, content)
 	split.Offset = 0.3
 
 	// The menu floats above everything, parked off screen to the left until

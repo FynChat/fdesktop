@@ -215,6 +215,9 @@ backend change is a one-line edit:
 | `CreateChannel` | `POST /api/channel/create` `{channel_type, name, avatar_url}` | Bearer | `{"channel_name", "channel_avatar"}` |
 | `ListMessages` | `GET /api/channels/{id}/messages` | Bearer | `[{"id", "channel_id", "sender_id", "content", "created_at"}, ...]` |
 | `SendMessage` | `POST /api/message/create/{id}` `{content}` | Bearer | the created message |
+| `ListContacts` | `GET /api/contacts` | Bearer | `[{"id", "name", "username", "avatar_url"}, ...]` |
+| `AddContact` | `POST /api/contacts` `{username}` | Bearer | the created contact, `201` |
+| `OpenPrivateChat` | `POST /api/channel/create` `{channel_type:"p2p", peer_id}` | Bearer | the channel, existing or new |
 
 Details:
 
@@ -226,18 +229,50 @@ Details:
   512-byte snippet of the response body, and every error is surfaced with
   `dialog.ShowError` rather than being swallowed.
 
-### Backend requirements
+### Private chats are get-or-create
 
-Two of the six routes do not exist in `fynchat-backend` yet. Until they are
-added, channel history and message history will fail with a 404 dialog; login,
-register and channel creation work as-is.
+A private chat is identified by the pair of people in it, so there can only
+ever be one. `OpenPrivateChat` therefore asks the backend for the chat with a
+person and does not care whether that meant making one:
+
+- no chat with that person yet (or it was deleted) → the backend creates it
+- a chat already exists → the backend returns **the same channel**, and the
+  client opens it
+
+The client relies on this and does not check first: two requests must never
+produce two chats with the same person. `POST /api/channel/create` with
+`channel_type: "p2p"` must be idempotent per user pair.
+
+A private chat is also the only kind the client does **not** name. The form
+that creates a channel offers Group and Channel only — a private chat starts
+from a contact, and the backend names it after the two people in it.
+
+### Contacts and channels are separate
+
+Adding a person and creating a conversation are different actions, and the UI
+keeps them apart:
+
+| Screen | Does | Route |
+| --- | --- | --- |
+| Contacts (`contacts.go`) | lists people, adds one by username | `GET`/`POST /api/contacts` |
+| New channel (`dialog.go`) | names a group or a broadcast | `POST /api/channel/create` |
+
+`POST /api/contacts` takes a **username**, not a display name: a handle is
+what resolves to an account, and letting the client pick the name is how one
+person becomes two contacts. The display name in the response is the
+backend's. The client sends the handle with any leading `@` already stripped.
+
+### Backend requirements
 
 | Route the client needs | Backend status | Change required |
 | --- | --- | --- |
 | `GET /api/channels` | ✅ implemented | – |
 | `GET /api/channels/:id/messages` | ✅ implemented | – |
 | `POST /api/message/create/:channel_id` | ✅ implemented | – |
-| `ws://…/ws` | ❌ missing | see [`docs/websockets.md`](docs/websockets.md) |
+| `ws://…/ws` | ✅ implemented | `internal/realtime` — see [`docs/websockets.md`](docs/websockets.md) |
+| `GET /api/contacts` | ❌ missing | return the user's contacts |
+| `POST /api/contacts` `{username}` | ❌ missing | resolve the handle, reject unknown users and duplicates |
+| p2p `POST /api/channel/create` | ❌ missing | accept `peer_id`, make it get-or-create per pair |
 | Port | ⚠️ `SERVER_PORT` defaults to `8000` | run with `FYNCHAT_API_URL=http://localhost:8000` |
 
 The backend's module path also had to be corrected (`fynchat.com` vs
@@ -246,7 +281,8 @@ The backend's module path also had to be corrected (`fynchat.com` vs
 only records them.
 
 The client and the backend were verified end to end against a live database:
-login, channel list, message history and message send all decode correctly.
+login, channel list, message history, message send and live push all decode
+correctly.
 
 ## WebSockets
 
@@ -262,13 +298,14 @@ are de-duplicated by `Message.ID`, so the message you send is not rendered
 twice when the server echoes it back.
 
 The connection is closed when you press **Back** or close the window. If the
-endpoint is absent the dialog is shown once and the view keeps working over
-REST.
+endpoint is absent the view keeps working over REST — live updates are a
+bonus, not the load-bearing path.
 
-**Server side:** [`docs/websockets.md`](docs/websockets.md) is the full Hub /
-client-pump / broadcast design to port into `fynchat-backend`, including
-heartbeats, reconnect backoff and the Redis Pub/Sub path for multi-instance
-deployments.
+**Server side:** `fynchat-backend/internal/realtime` implements the Hub /
+client-pump / broadcast design from
+[`docs/websockets.md`](docs/websockets.md). The socket authenticates from the
+`token` query parameter rather than a header, because a WebSocket handshake
+cannot carry one — so `/ws` sits outside the `/api` group on purpose.
 
 ## Testing
 
@@ -279,9 +316,13 @@ go test -race ./...
 `httpclient_test.go` runs the client against `net/http/httptest` servers and
 covers: login, register, the backend's `token` field, error responses, the
 `Bearer` header, request bodies and paths, list/create channel, list/send
-message, and malformed JSON. No backend and no database needed — but the
-system packages from [Requirements](#requirements) are, because `go test`
-compiles the whole `main` package including the Fyne views.
+message, listing and adding contacts, get-or-create for private chats, and
+malformed JSON. No backend and no database needed — but the system packages
+from [Requirements](#requirements) are, because `go test` compiles the whole
+`main` package including the Fyne views.
+
+`dialog_test.go` covers the rules the UI can check without a server: what a
+channel name may be, what counts as a username, and how contacts are searched.
 
 Expected result:
 
@@ -292,10 +333,24 @@ ok  	fynchat	1.034s
 `gofmt -l .` and `go vet ./...` are clean.
 
 `make shots` renders every view to a PNG with the Fyne software driver, which
-is how the UI gets reviewed without opening a window. It sits behind a
-`screenshot` build tag because Fyne's test driver runs `fyne.Do` inline rather
-than queueing it, so the race detector fires on the harness even though the
-app is correct.
+is how the UI gets reviewed without opening a window (`shot-shell-chat.png`,
+`shot-contacts.png`, the dialogs, and so on). It sits behind a `screenshot`
+build tag because Fyne's test driver runs `fyne.Do` inline rather than
+queueing it, so the race detector fires on the harness even though the app is
+correct. It also runs single-threaded and retries, for the same reason.
+
+### Fyne 2.8 pitfalls this code works around
+
+Each of these was found by a crash, not by guessing, and each has a comment at
+the place it applies:
+
+| Symptom | Cause | What the code does |
+| --- | --- | --- |
+| `slice bounds out of range` in `drawOblongStroke` | an `Entry` inside a container built hidden and shown later: it was never laid out, so its border is stroked at a negative radius | swaps a container's `Objects` (`shell.go`, `menupanel.go`) or uses its own dialog instead of hiding a form (`dialog.go`) |
+| the same, from a list | a `widget.List` wrapped in a scroll: it has its own scroller, and an outer one hands it unbounded height | `SetMinSize` on a transparent rectangle inside `Max` (`contacts.go`) |
+| a row of blank boxes | assigning `Text` without `Refresh()`, so the renderer keeps painting the old text | `Refresh()` after setting text |
+| a search box stretched down the window | `NewBorder`'s left slot is for a side panel, not a top row | search entries go in the top region |
+| nothing painted at all | the canvas walks children by asserting `*fyne.Container`, so a struct embedding one paints nothing | rows hold a plain container (`channelRow`, `contactRow`) |
 
 ## Cross-compiling
 

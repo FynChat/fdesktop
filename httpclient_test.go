@@ -171,6 +171,113 @@ func TestListChannelsSendsBearer(t *testing.T) {
 	}
 }
 
+// Opening a private chat is a get-or-create: the client asks for the chat with
+// a person and does not care whether that made one. What it must send is the
+// peer, since that is the only thing identifying the conversation.
+func TestOpenPrivateChatSendsThePeerOnly(t *testing.T) {
+	c := NewHTTPClient()
+	c.Token = "jwt-abc"
+
+	newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/channel/create" {
+			t.Errorf("got %s %s, want POST /api/channel/create", r.Method, r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer jwt-abc" {
+			t.Errorf("Authorization = %q, want %q", got, "Bearer jwt-abc")
+		}
+
+		// Decoded as map[string]any rather than through decodeBody, because
+		// peer_id is a number and decodeBody only handles string values.
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decode body %q: %v", raw, err)
+		}
+
+		if body["channel_type"] != "p2p" {
+			t.Errorf("channel_type = %v, want p2p", body["channel_type"])
+		}
+		if body["peer_id"] != float64(42) {
+			t.Errorf("peer_id = %v, want 42", body["peer_id"])
+		}
+		// The name belongs to the backend, which names the chat after the two
+		// people in it, so sending one would leave it guessing.
+		if _, present := body["name"]; present {
+			t.Errorf("body = %v; a private chat must not send a name", body)
+		}
+
+		io.WriteString(w, `{"id":"c9","channel_name":"Grace Hopper","channel_avatar":"","channel_type":"p2p"}`)
+	})
+
+	channel, err := c.OpenPrivateChat(42)
+	if err != nil {
+		t.Fatalf("OpenPrivateChat: %v", err)
+	}
+	if channel.ChannelName != "Grace Hopper" || channel.ChannelType != "p2p" {
+		t.Errorf("channel = %+v", channel)
+	}
+}
+
+// Adding a contact sends the handle, because that is what names an account.
+func TestAddContactSendsTheHandle(t *testing.T) {
+	c := NewHTTPClient()
+	c.Token = "jwt-abc"
+
+	newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/contacts" {
+			t.Errorf("got %s %s, want POST /api/contacts", r.Method, r.URL.Path)
+		}
+		body := decodeBody(t, r)
+		if body["username"] != "kj" {
+			t.Errorf("body = %v, want the handle", body)
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, `{"id":4,"name":"Katherine Johnson","username":"kj","avatar_url":""}`)
+	})
+
+	contact, err := c.AddContact("kj")
+	if err != nil {
+		t.Fatalf("AddContact: %v", err)
+	}
+	if contact.ID != 4 || contact.Name != "Katherine Johnson" || contact.Username != "kj" {
+		t.Errorf("contact = %+v", contact)
+	}
+}
+
+// The contacts the private-chat screen offers come from their own route.
+func TestListContacts(t *testing.T) {
+	c := NewHTTPClient()
+	c.Token = "jwt-abc"
+
+	newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/contacts" {
+			t.Errorf("got %s %s, want GET /api/contacts", r.Method, r.URL.Path)
+		}
+		io.WriteString(w, `[
+			{"id":2,"name":"Grace Hopper","username":"amazing","avatar_url":"g.png"},
+			{"id":3,"name":"Alan Turing","username":"turing","avatar_url":""}
+		]`)
+	})
+
+	contacts, err := c.ListContacts()
+	if err != nil {
+		t.Fatalf("ListContacts: %v", err)
+	}
+	if len(contacts) != 2 {
+		t.Fatalf("got %d contacts, want 2", len(contacts))
+	}
+	if contacts[0].ID != 2 || contacts[0].Name != "Grace Hopper" || contacts[0].Username != "amazing" {
+		t.Errorf("contacts[0] = %+v", contacts[0])
+	}
+	if contacts[1].Avatar != "" {
+		t.Errorf("contacts[1] = %+v", contacts[1])
+	}
+}
+
 func TestCreateChannel(t *testing.T) {
 	c := NewHTTPClient()
 	c.Token = "jwt-abc"
@@ -185,6 +292,12 @@ func TestCreateChannel(t *testing.T) {
 		body := decodeBody(t, r)
 		if body["channel_type"] != "text" || body["name"] != "dev" || body["avatar_url"] != "d.png" {
 			t.Errorf("body = %v", body)
+		}
+		// A named channel has no second member, so peer_id must be absent
+		// rather than sent as zero: 0 would be indistinguishable from a peer
+		// that was never set.
+		if _, present := body["peer_id"]; present {
+			t.Errorf("body = %v; a named channel must not send peer_id", body)
 		}
 		io.WriteString(w, `{"channel_name":"dev","channel_avatar":"d.png"}`)
 	})
