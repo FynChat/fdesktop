@@ -151,3 +151,13 @@ func pillBackground() color.Color {
 	}
 	return color.NRGBA{R: 0xE7, G: 0xE9, B: 0xEC, A: 0xff}
 }
+
+// cardBackground is the raised surface used by dialogs and the auth form:
+// a shade above the window background so the card reads as a separate panel
+// without needing a border.
+func cardBackground() color.Color {
+	if currentIsDark {
+		return color.NRGBA{R: 0x17, G: 0x21, B: 0x2B, A: 0xff}
+	}
+	return color.NRGBA{R: 0xF7, G: 0xF9, B: 0xFA, A: 0xff}
+}

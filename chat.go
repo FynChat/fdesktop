@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -26,7 +27,7 @@ import (
 // It returns the content and a stop function. The stop function must be called
 // when the view is swapped for another channel, otherwise the WebSocket
 // goroutine keeps receiving into a view nobody is looking at any more.
-func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channelName, channelType string) (fyne.CanvasObject, func()) {
+func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channelName, channelType string, avatarData []byte) (fyne.CanvasObject, func()) {
 	messagesBox := container.NewVBox()
 	banner := errorBannerWidget()
 
@@ -141,13 +142,63 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 		}
 	}()
 
-	// A multi-line composer, like Telegram's: Enter starts a new line and
-	// Ctrl+Enter sends. A single-line entry cannot hold a paragraph and it is
-	// the main thing people notice when chatting.
+	// A multi-line composer: Enter starts a new line and Ctrl+Enter sends.
+	// The entry grows vertically as you type, capped at six rows, and shrinks
+	// back when the text is cleared.
+	const (
+		minRows   = 1
+		maxRows   = 6
+		rowHeight = 28
+	)
 	entry := widget.NewMultiLineEntry()
 	entry.SetPlaceHolder("Message")
 	entry.Wrapping = fyne.TextWrapWord
-	entry.SetMinRowsVisible(1)
+	entry.SetMinRowsVisible(minRows)
+
+	// growTo sets how many rows the entry claims. The Border layout sizes the
+	// bottom object by its MinSize, so changing MinRowsVisible is what actually
+	// resizes the field — calling Resize() by hand is overridden on the next
+	// layout pass and does nothing.
+	growTo := func(rows int) {
+		if rows < minRows {
+			rows = minRows
+		}
+		if rows > maxRows {
+			rows = maxRows
+		}
+		entry.SetMinRowsVisible(rows)
+	}
+
+	// OnChanged must be assigned before the first SetText so the height is
+	// right from the start; assigning after would leave a restored draft at
+	// one row until the next keystroke.
+	entry.OnChanged = func(text string) {
+		lines := strings.Count(text, "\n") + 1
+		if strings.TrimSpace(text) == "" {
+			lines = 1
+		}
+		growTo(lines)
+	}
+
+	// attachBtn opens the system file picker. The backend has no upload route
+	// yet, so a picked file is acknowledged rather than silently dropped.
+	attachBtn := widget.NewButtonWithIcon("", theme.FileIcon(), func() {
+		dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
+			}
+			defer reader.Close()
+			dialog.ShowInformation("Attachments",
+				"File attachment is not implemented yet in the backend.", w)
+		}, w).Show()
+	})
+	attachBtn.Importance = widget.LowImportance
+
+	// emojiBtn opens a small grid of emoji that are inserted at the caret.
+	emojiBtn := widget.NewButtonWithIcon("", theme.ConfirmIcon(), func() {
+		showEmojiPicker(w, entry)
+	})
+	emojiBtn.Importance = widget.LowImportance
 
 	sending := widget.NewButtonWithIcon("", theme.MailSendIcon(), nil)
 	sending.Importance = widget.HighImportance
@@ -172,6 +223,7 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 					return
 				}
 				entry.SetText("")
+				entry.Refresh()
 				banner.Clear()
 				load()
 			})
@@ -179,7 +231,6 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	}
 
 	sending.OnTapped = send
-	entry.OnSubmitted = func(string) { send() }
 
 	// Telegram puts the avatar, then the channel name on one line with a quieter
 	// summary under it, and the actions on the right.
@@ -190,10 +241,16 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	subtitle := canvas.NewText(channelTypeLabel(channelType), theme.PlaceHolderColor())
 	subtitle.TextSize = theme.Size(theme.SizeNameCaptionText)
 
-	heading := container.NewHBox(
-		container.NewGridWrap(fyne.NewSquareSize(36), avatar(initial(channelName), 36)),
-		container.NewVBox(title, subtitle),
-	)
+	channelInfo := container.NewVBox(title, subtitle)
+
+	avatarWidget := container.NewGridWrap(fyne.NewSquareSize(36), avatar(initial(channelName), 36, avatarData))
+
+	// A Border rather than an HBox with a spacer: an HBox shows every child
+	// at its minimum width, so the spacer stretches but the text beside it
+	// does not, and a long channel name is clipped instead of pushing the
+	// buttons right. The Border hands the middle column all the slack.
+	heading := container.NewBorder(nil, nil,
+		container.NewHBox(avatarWidget, channelInfo), nil, nil)
 
 	refreshBtn := iconButton(theme.ViewRefreshIcon(), func() {
 		banner.Clear()
@@ -211,7 +268,18 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 	header := container.NewPadded(container.NewBorder(nil, nil, heading,
 		container.NewHBox(themeBtn, refreshBtn), nil))
 
-	composer := container.NewBorder(nil, banner.wrap, nil, sending, container.NewPadded(entry))
+	// A separator line above the composer reads better than a bare entry:
+	// it marks where the history ends without inventing a second surface.
+	separator := canvas.NewRectangle(theme.PlaceHolderColor())
+	separator.SetMinSize(fyne.NewSize(0, 1))
+
+	// The buttons sit to the right of the entry, aligned to the first row
+	// rather than stretched over the whole composer, so a six-line entry
+	// does not leave a send button floating in the middle.
+	actions := container.NewHBox(attachBtn, emojiBtn, sending)
+	composerInput := container.NewBorder(nil, nil, nil, actions,
+		container.NewPadded(entry))
+	composer := container.NewVBox(separator, composerInput, banner.wrap)
 
 	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll)), cancelWS
 }
@@ -329,10 +397,13 @@ func messageRow(m Message, myUserID int, grouped bool) fyne.CanvasObject {
 	if !mine && !grouped {
 		who := canvas.NewText(name, senderColour(m.SenderID))
 		who.TextStyle = fyne.TextStyle{Bold: true}
+		who.TextSize = theme.Size(theme.SizeNameCaptionText)
 		parts = append(parts, who)
 	}
 	parts = append(parts, body)
-	if stamp := messageTime(m); stamp != "" {
+	// Grouped messages hide their time too: the group is one event, and a
+	// stamp on every line repeats what the first one already says.
+	if stamp := messageTime(m); stamp != "" && !grouped {
 		parts = append(parts, rightAligned(smallText(stamp)))
 	}
 
@@ -390,4 +461,34 @@ func smallText(s string) *canvas.Text {
 // so you can tell who is talking without reading the id.
 func senderColour(senderID int) color.Color {
 	return avatarColor(strconv.Itoa(senderID))
+}
+
+// showEmojiPicker offers a small palette of emoji and inserts the one that is
+// tapped at the end of the entry. It closes on a pick so a second emoji means
+// a second round trip, which is the price of the picker being a plain dialog.
+func showEmojiPicker(parent fyne.Window, entry *widget.Entry) {
+	emojis := []string{
+		"😀", "😂", "❤️", "👍", "👎",
+		"😊", "😢", "😮", "😡", "😴",
+		"🎉", "🎊", "⭐", "🔥", "💯",
+		"✅", "❌", "😎", "🤔", "🙏",
+	}
+
+	// A capture is taken per button so every closure gets its own rune;
+	// looping over the slice variable would hand all of them the last value.
+	buttons := make([]fyne.CanvasObject, 0, len(emojis))
+	for _, emoji := range emojis {
+		emoji := emoji
+		btn := widget.NewButton(emoji, func() {
+			entry.SetText(entry.Text + emoji)
+			entry.Refresh()
+		})
+		btn.Importance = widget.LowImportance
+		buttons = append(buttons, btn)
+	}
+
+	chosen := dialog.NewCustom("Emoji Picker", "Close",
+		container.NewGridWithColumns(5, buttons...), parent)
+	chosen.Resize(fyne.NewSize(320, 260))
+	chosen.Show()
 }

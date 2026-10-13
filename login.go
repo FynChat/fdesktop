@@ -76,40 +76,56 @@ func authLayout(heading, subtitle string, fields []fyne.CanvasObject, banner *er
 	title := canvas.NewText(heading, theme.ForegroundColor())
 	title.TextStyle = fyne.TextStyle{Bold: true}
 	title.TextSize = theme.Size(theme.SizeNameHeadingText)
+	title.Alignment = fyne.TextAlignCenter
 
-	sub := canvas.NewText(subtitle, theme.PlaceHolderColor())
+	sub := widget.NewLabel(subtitle)
 	sub.Alignment = fyne.TextAlignCenter
+	sub.Importance = widget.LowImportance
 
 	link := newLinkLabel(linkLabel, onLink)
 
 	content := []fyne.CanvasObject{
-		container.NewCenter(appLogo(72)),
+		container.NewCenter(appLogo(80)),
+		gap(12),
 		container.NewCenter(title),
-		container.NewCenter(sub),
-		gap(20),
+		sub,
+		gap(24),
 	}
 	for _, f := range fields {
-		content = append(content, f, gap(6))
+		content = append(content, f, gap(8))
 	}
 	content = append(content,
-		gap(6),
+		gap(8),
 		primary,
 		banner.wrap,
+		gap(16),
+		widget.NewSeparator(),
+		gap(12),
 		container.NewCenter(container.NewVBox(linkPromptLabel(linkPrompt), link)),
 	)
 
-	card := container.NewPadded(container.NewVBox(content...))
+	// A card with a subtle surface, centred in the window. The VBox hugs
+	// its content, so the form keeps a readable width instead of stretching.
+	cardContent := container.NewPadded(container.NewVBox(content...))
 
-	// Center, not a fixed-width wrapper: a GridWrap with a zero height
-	// collapses the card and the VBox lays itself out from the bottom up.
-	// A VBox hugs its content, so the form keeps its natural width.
+	// Card background with rounded corners
+	cardBg := canvas.NewRectangle(cardBackground())
+	cardBg.CornerRadius = 16
+
+	card := container.NewStack(cardBg, cardContent)
+
 	return container.NewCenter(card)
 }
 
 // linkPromptLabel is the small grey "no account yet?" text above a hyperlink.
+//
+// Alignment is set explicitly: a VBox hands every child the full width of the
+// box, and canvas.Text draws at its leading edge by default, so a short line
+// of text would sit hard left inside a wide card.
 func linkPromptLabel(text string) fyne.CanvasObject {
 	l := canvas.NewText(text, theme.PlaceHolderColor())
 	l.TextSize = theme.Size(theme.SizeNameCaptionText)
+	l.Alignment = fyne.TextAlignCenter
 	return l
 }
 

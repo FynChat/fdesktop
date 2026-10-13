@@ -114,6 +114,10 @@ func newLinkLabel(text string, onTap func()) *linkLabel {
 		onTap: onTap,
 	}
 	l.text.TextStyle = fyne.TextStyle{Italic: true}
+	// The renderer stretches the text to the widget's full width, and a
+	// canvas.Text draws at its leading edge unless told otherwise — the same
+	// reason the prompt line above it needs centring.
+	l.text.Alignment = fyne.TextAlignCenter
 	l.ExtendBaseWidget(l)
 	return l
 }
@@ -139,10 +143,21 @@ func initial(name string) string {
 
 // avatar draws a coloured circle with a name's initial inside it — the same
 // trick Telegram uses when a user has no profile picture.
-func avatar(name string, size float32) fyne.CanvasObject {
-	letter := initial(name)
+// If data is not nil, it is used as a logo/image inside the circle instead
+// of initials. The data should be a PNG or JPEG image bytes.
+func avatar(name string, size float32, data ...[]byte) fyne.CanvasObject {
 	box := fyne.NewSize(size, size)
 
+	if len(data) > 0 && data[0] != nil {
+		// Use provided image data instead of initials.
+		img, err := decodeImageFromBytes(data[0])
+		if err == nil {
+			return avatarImage(img, size)
+		}
+		// Fall back to initials if decoding fails.
+	}
+
+	letter := initial(name)
 	// A rectangle with a corner radius of half its size is a circle, and it
 	// supports SetMinSize, which canvas.Circle does not.
 	circle := canvas.NewRectangle(avatarColor(letter))
@@ -157,6 +172,32 @@ func avatar(name string, size float32) fyne.CanvasObject {
 	text.SetMinSize(box)
 
 	return container.NewStack(circle, text)
+}
+
+// avatarImage displays a decoded image inside a circular mask.
+func avatarImage(img image.Image, size float32) fyne.CanvasObject {
+	box := fyne.NewSize(size, size)
+
+	circle := canvas.NewRectangle(color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff})
+	circle.CornerRadius = size / 2
+	circle.Resize(box)
+	circle.SetMinSize(box)
+
+	fyneImg := canvas.NewImageFromImage(img)
+	fyneImg.ScaleMode = canvas.ImageScalePixels
+	fyneImg.Resize(fyne.NewSize(size*0.8, size*0.8))
+	fyneImg.SetMinSize(fyne.NewSize(size*0.8, size*0.8))
+
+	return container.NewStack(circle, container.NewCenter(fyneImg))
+}
+
+// decodeImageFromBytes tries to decode a PNG/JPEG from raw bytes.
+func decodeImageFromBytes(data []byte) (image.Image, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 // avatarColor gives each initial a stable colour, so the same person keeps

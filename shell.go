@@ -26,7 +26,7 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 		stopChat()
 
 		var view fyne.CanvasObject
-		view, stopChat = chatView(client, prefs, w, ch.ID, ch.ChannelName, ch.ChannelType)
+		view, stopChat = chatView(client, prefs, w, ch.ID, ch.ChannelName, ch.ChannelType, ch.ChannelAvatar)
 		prefs.SetLastChannel(ch.ID)
 
 		content.Objects[0] = view
@@ -81,7 +81,6 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 	showChats()
 
 	menu = newSideMenu(client, prefs, side, onLogout, nil, showContacts)
-	menu.scrim = menu.scrimFor()
 
 	// A draggable split, like the divider in Telegram Desktop: the list keeps
 	// roughly a third of the window and both sides can be resized.
@@ -95,7 +94,7 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 	menu.panel.Move(fyne.NewPos(-menuWidth, 0))
 
 	overlay := container.NewStack(split)
-	overlay.Objects = append(overlay.Objects, menu.scrimFor(), holder)
+	overlay.Objects = append(overlay.Objects, menu.scrim, holder)
 
 	// Opening a chat from anywhere else, such as restoring the last one on
 	// launch, still marks the row.

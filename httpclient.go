@@ -92,8 +92,37 @@ func baseURLFromEnv() string {
 type Channel struct {
 	ID            string `json:"id"`
 	ChannelName   string `json:"channel_name"`
-	ChannelAvatar string `json:"channel_avatar"`
+	ChannelAvatar []byte `json:"channel_avatar"`
 	ChannelType   string `json:"channel_type"`
+}
+
+// UnmarshalJSON handles the fact that the backend sends channel_avatar as a
+// plain string (like "d.png" or base64), but Go's []byte expects base64.
+// This custom unmarshaler accepts both formats.
+func (c *Channel) UnmarshalJSON(data []byte) error {
+	type Alias Channel
+	aux := &struct {
+		ChannelAvatar interface{} `json:"channel_avatar"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Convert the avatar data to []byte
+	if aux.ChannelAvatar != nil {
+		switch v := aux.ChannelAvatar.(type) {
+		case string:
+			c.ChannelAvatar = []byte(v)
+		case nil:
+			c.ChannelAvatar = nil
+		}
+	}
+
+	return nil
 }
 
 // Message is a single chat message as returned by the backend.
@@ -298,8 +327,12 @@ func (c *HTTPClient) ListChannels() ([]Channel, error) {
 
 // CreateChannel creates a named channel: a group or a broadcast. A private
 // chat is not created here — it comes from a contact, see OpenPrivateChat.
-func (c *HTTPClient) CreateChannel(channelType, name, avatar string) (Channel, error) {
-	body := map[string]string{"channel_type": channelType, "name": name, "avatar_url": avatar}
+func (c *HTTPClient) CreateChannel(channelType, name string, avatarData []byte) (Channel, error) {
+	body := map[string]interface{}{"channel_type": channelType, "name": name}
+	if len(avatarData) > 0 {
+		// Send avatar as base64 encoded string for JSON transport
+		body["avatar_url"] = string(avatarData)
+	}
 	var channel Channel
 	if err := c.do(http.MethodPost, routeChannelCreate, body, true, &channel); err != nil {
 		return Channel{}, err

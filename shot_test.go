@@ -183,7 +183,7 @@ func TestRenderViews(t *testing.T) {
 
 	// The two dialogs and the Contacts screen. Each goes in its own window:
 	// a window shows one content object, and the dialogs are overlays on top.
-	newChannelDialog(dialogWin, func(kind, name, avatar string) error { return nil })
+	newChannelDialog(dialogWin, func(kind, name string, avatarData []byte) error { return nil })
 	snapIn(t, dialogWin, "shot-dialog-channel.png")
 
 	contactWin := test.NewWindow(nil)

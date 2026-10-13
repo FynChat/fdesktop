@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -34,10 +35,9 @@ var channelTypes = []channelType{
 // cleanChannelInput trims what was typed and rejects the one thing the client
 // can catch on its own: a named channel with no name. Kept separate from the
 // dialog so the rules can be tested without building a window.
-func cleanChannelInput(kind, name, avatar string) (string, string, string, error) {
+func cleanChannelInput(kind, name string) (string, string, error) {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	name = strings.TrimSpace(name)
-	avatar = strings.TrimSpace(avatar)
 
 	known := false
 	for _, ct := range channelTypes {
@@ -47,34 +47,14 @@ func cleanChannelInput(kind, name, avatar string) (string, string, string, error
 		}
 	}
 	if !known {
-		return "", "", "", fmt.Errorf("pick one of the channel types shown")
+		return "", "", fmt.Errorf("pick one of the channel types shown")
 	}
 
 	if name == "" {
-		return "", "", "", errors.New("Give your channel a name")
+		return "", "", errors.New("Give your channel a name")
 	}
 
-	return kind, name, avatar, nil
-}
-
-// cleanContactHandle normalises what the user typed into the handle the backend
-// expects.
-//
-// The leading @ is the part worth handling: people type it out of habit, and
-// "＠" and "@" are different characters to a database. Trimming it here means
-// the backend only ever sees one spelling of a handle.
-func cleanContactHandle(raw string) (string, error) {
-	handle := strings.TrimSpace(raw)
-	handle = strings.TrimPrefix(handle, "@")
-
-	if handle == "" {
-		return "", errors.New("Enter the username of the person to add")
-	}
-	if strings.ContainsAny(handle, " \t") {
-		return "", errors.New("A username has no spaces in it")
-	}
-
-	return handle, nil
+	return kind, name, nil
 }
 
 // newChannelDialog asks for the details of a new channel. The type is picked
@@ -84,27 +64,55 @@ func cleanContactHandle(raw string) (string, error) {
 // onCreate is called with the chosen values; returning an error keeps the
 // dialog open and shows the message, which is how a name clash or a rejected
 // type is reported without the dialog vanishing first.
-func newChannelDialog(parent fyne.Window, onCreate func(kind, name, avatar string) error) {
+func newChannelDialog(parent fyne.Window, onCreate func(kind, name string, avatarData []byte) error) {
 	selected := channelTypes[0]
 	nameEntry := widget.NewEntry()
 	nameEntry.SetPlaceHolder("general")
-	avatarEntry := widget.NewEntry()
-	avatarEntry.SetPlaceHolder("https://… (optional)")
 	problem := widget.NewLabel("")
 	problem.Importance = widget.LowImportance
 	problem.Hide()
 
+	// Avatar handling with file selector
+	var selectedAvatarData []byte
+	avatarLabel := widget.NewLabel("No avatar selected")
+
 	// The avatar preview updates as the name is typed, so the row shows what
 	// the channel will look like in the list.
-	preview := container.NewGridWrap(fyne.NewSquareSize(48), avatar(selected.label, 48))
+	preview := container.NewGridWrap(fyne.NewSquareSize(48), avatar(selected.label, 48, nil))
 	nameEntry.OnChanged = func(text string) {
 		label := strings.TrimSpace(text)
 		if label == "" {
 			label = selected.label
 		}
-		preview.Objects[0] = avatar(label, 48)
+		preview.Objects[0] = avatar(label, 48, selectedAvatarData)
 		preview.Refresh()
 	}
+
+	// File selector button for avatar
+	selectAvatarBtn := widget.NewButton("Select Avatar Image", func() {
+		dialog.NewFileOpen(func(reader fyne.URIReadCloser, err error) {
+			if err != nil || reader == nil {
+				return
+			}
+			defer reader.Close()
+
+			data, err := os.ReadFile(reader.URI().Path())
+			if err != nil {
+				return
+			}
+
+			selectedAvatarData = data
+			avatarLabel.SetText("Avatar selected: " + reader.URI().Name())
+
+			// Update preview with new avatar
+			label := strings.TrimSpace(nameEntry.Text)
+			if label == "" {
+				label = selected.label
+			}
+			preview.Objects[0] = avatar(label, 48, selectedAvatarData)
+			preview.Refresh()
+		}, parent).Show()
+	})
 
 	// Type picker: one button per kind, the chosen one filled in.
 	var typeButtons []*widget.Button
@@ -143,8 +151,9 @@ func newChannelDialog(parent fyne.Window, onCreate func(kind, name, avatar strin
 		widget.NewLabelWithStyle("Name", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		nameEntry,
 		widget.NewLabelWithStyle("Avatar", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		avatarEntry,
-		container.NewHBox(preview, widget.NewLabel("Shown in the channel list")),
+		selectAvatarBtn,
+		avatarLabel,
+		container.NewHBox(preview, widget.NewLabel("Preview in channel list\n(Leave blank for initials)")),
 		problem,
 	)
 
@@ -157,7 +166,7 @@ func newChannelDialog(parent fyne.Window, onCreate func(kind, name, avatar strin
 				return
 			}
 
-			kind, name, avatar, err := cleanChannelInput(selected.value, nameEntry.Text, avatarEntry.Text)
+			kind, name, err := cleanChannelInput(selected.value, nameEntry.Text)
 			if err != nil {
 				problem.SetText(err.Error())
 				problem.Show()
@@ -165,7 +174,7 @@ func newChannelDialog(parent fyne.Window, onCreate func(kind, name, avatar strin
 			}
 
 			go func() {
-				err := onCreate(kind, name, avatar)
+				err := onCreate(kind, name, selectedAvatarData)
 
 				fyne.Do(func() {
 					if err != nil {
@@ -237,4 +246,24 @@ func addContactDialog(parent fyne.Window, onAdd func(username string) error) {
 		}, parent)
 
 	d.Show()
+}
+
+// cleanContactHandle normalises what the user typed into the handle the backend
+// expects.
+//
+// The leading @ is the part worth handling: people type it out of habit, and
+// "＠" and "@" are different characters to a database. Trimming it here means
+// the backend only ever sees one spelling of a handle.
+func cleanContactHandle(raw string) (string, error) {
+	handle := strings.TrimSpace(raw)
+	handle = strings.TrimPrefix(handle, "@")
+
+	if handle == "" {
+		return "", errors.New("Enter the username of the person to add")
+	}
+	if strings.ContainsAny(handle, " \t") {
+		return "", errors.New("A username has no spaces in it")
+	}
+
+	return handle, nil
 }

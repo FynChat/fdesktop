@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"image/color"
 	"time"
 
@@ -21,7 +22,7 @@ const menuWidth = 280
 // settings that belong there rather than in a toolbar.
 type sideMenu struct {
 	panel   *fyne.Container
-	scrim   *canvas.Rectangle
+	scrim   *scrimWidget
 	open    bool
 	anim    *fyne.Animation
 	onClose func()
@@ -39,15 +40,27 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		name = "Your account"
 	}
 
-	// Account row: avatar, name and where to manage the account.
-	account := container.NewBorder(nil, nil,
-		container.NewHBox(
-			container.NewGridWrap(fyne.NewSquareSize(40), avatar(initial(name), 40)),
-			container.NewVBox(
-				canvas.NewText(name, theme.ForegroundColor()),
-				smallText("Tap to manage your account"),
-			),
-		), nil, nil)
+	// Enhanced account row with better styling
+	userName := canvas.NewText(name, theme.ForegroundColor())
+	userName.TextStyle = fyne.TextStyle{Bold: true}
+	userName.TextSize = theme.Size(theme.SizeNameSubHeadingText)
+
+	userSub := canvas.NewText("User ID: "+fmt.Sprintf("%d", client.UserID), theme.PlaceHolderColor())
+	userSub.TextSize = theme.Size(theme.SizeNameCaptionText)
+
+	avatarWidget := container.NewGridWrap(fyne.NewSquareSize(52), avatar(initial(name), 52))
+
+	accountDetails := container.NewVBox(userName, userSub)
+	accountDetails = container.NewPadded(accountDetails)
+
+	accountRow := container.NewHBox(avatarWidget, accountDetails)
+	accountRow = container.NewPadded(accountRow)
+
+	// Account row with better styling
+	accountBg := canvas.NewRectangle(panelBackground())
+	accountBg.CornerRadius = 12
+
+	account := container.NewPadded(container.NewStack(accountBg, container.NewPadded(accountRow)))
 
 	// Declared first: the row's own handler updates the note it shows.
 	var themeItem *menuItem
@@ -58,6 +71,7 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		prefs.SetDarkTheme(!prefs.DarkTheme())
 		prefs.apply()
 		themeItem.SetNote(themeNote(prefs))
+		// Close menu after action - we'll do this via scrim tap
 	})
 
 	// Contacts and the two ways of making a conversation sit above the
@@ -66,6 +80,7 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		if onContacts != nil {
 			onContacts()
 		}
+		// Close menu after navigation
 	})
 	newGroup := newMenuItem(theme.FolderNewIcon(), "New group", "", func() {
 		comingSoon("New group")
@@ -89,7 +104,8 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 	panel := container.NewStack(
 		canvas.NewRectangle(panelBackground()),
 		container.NewVBox(
-			container.NewPadded(account),
+			account,
+			widget.NewSeparator(),
 			searchSlot,
 			contacts, newGroup,
 			sectionLabel("Settings"),
@@ -99,12 +115,30 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		),
 	)
 
-	return &sideMenu{
+	m := &sideMenu{
 		panel:      panel,
 		onClose:    onClose,
 		searchSlot: searchSlot,
 		search:     side.search,
 	}
+	m.buildScrim()
+	return m
+}
+
+// buildScrim creates the tap-to-close dimmer that sits beside the open menu. It
+// is a single tappable rectangle, NOT a button stacked over the window: a Stack
+// gives every child the full size, so an invisible button there swallowed every
+// tap on the sidebar and the chat underneath.
+func (m *sideMenu) buildScrim() {
+	m.scrim = newScrimWidget(func() {
+		if m.open {
+			if app := fyne.CurrentApp(); app != nil {
+				if wins := app.Driver().AllWindows(); len(wins) > 0 {
+					m.toggle(wins[0].Canvas().Size())
+				}
+			}
+		}
+	})
 }
 
 // showChannelSearch puts the channel search box in the menu or takes it out.
@@ -171,13 +205,35 @@ func (m *sideMenu) toggle(canvasSize fyne.Size) {
 	}
 }
 
-// scrimFor is the dimmed area beside the menu; tapping it closes the menu.
-func (m *sideMenu) scrimFor() *canvas.Rectangle {
-	if m.scrim == nil {
-		m.scrim = canvas.NewRectangle(color.NRGBA{A: 0x99})
-		m.scrim.Hide()
+// scrimWidget is the dimmed area beside the open menu. It fills the window (the
+// overlay Stack sizes it) and closes the menu when tapped anywhere the menu
+// panel is not. It is a tappable rectangle rather than a button on top of one:
+// a Stack hands every child the full window size, so an invisible button would
+// sit over the whole app and swallow every tap on the sidebar and the chat.
+type scrimWidget struct {
+	widget.BaseWidget
+	rect  *canvas.Rectangle
+	onTap func()
+}
+
+func newScrimWidget(onTap func()) *scrimWidget {
+	s := &scrimWidget{
+		rect:  canvas.NewRectangle(color.NRGBA{A: 0x99}),
+		onTap: onTap,
 	}
-	return m.scrim
+	s.ExtendBaseWidget(s)
+	s.Hide() // hidden until the menu opens
+	return s
+}
+
+func (s *scrimWidget) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(s.rect)
+}
+
+func (s *scrimWidget) Tapped(*fyne.PointEvent) {
+	if s.onTap != nil {
+		s.onTap()
+	}
 }
 
 // comingSoon reports a section that exists in the menu but not yet in the app,
