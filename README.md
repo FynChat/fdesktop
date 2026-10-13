@@ -31,20 +31,31 @@ FCP lands — see [Roadmap](#roadmap).
 
 ## Status
 
-> **Pre-alpha.** The UI and all six API methods are implemented and unit-tested,
-> and the client talks to `fynchat-backend` successfully: login, the channel
-> list, message history and sending all work against a live database. Live
+> **Pre-alpha.** The UI and every API method the client calls are implemented
+> and unit-tested, and the client talks to `fynchat-backend` successfully:
+> login, the channel list, message history and sending all work against a live
+> database. Channel avatars are picked from disk and rendered in the list. Live
 > message push needs a WebSocket the backend does not expose yet — see
 > [Backend requirements](#backend-requirements).
 
 ## Features
 
 - **Register / login** — checked in the form before anything is sent, JWT stored
-  in the shared client.
+  in the shared client. Both screens sit on a raised card so the form reads as
+  one object instead of floating on the background.
 - **Channel list** — avatars, channel type, create a channel, pull to refresh.
 - **Chat view** — history as bubbles with sender and time, own messages on the
   right, consecutive messages grouped, date separators, live push over a
   WebSocket when the backend exposes one.
+- **Channel avatars** — the new-channel dialog picks an image from your computer
+  with a file selector (no URL to paste) and shows a live preview of how the
+  channel will look in the list. Channels without an image fall back to a
+  coloured circle with the first letter, the same trick Telegram uses.
+- **Auto-growing message box** — the composer grows as you type, up to six rows,
+  and shrinks back when the text is cleared.
+- **Emoji and attachments** — an emoji palette inserts a reaction at the caret,
+  and an attach button opens the system file picker (the backend has no upload
+  route yet, so a picked file is acknowledged rather than silently dropped).
 - **Dark and light** — the palette icon in the header switches, and the choice
   is remembered.
 - **Stays where you left off** — the session, the last channel and the theme
@@ -54,6 +65,8 @@ FCP lands — see [Roadmap](#roadmap).
   once, instead of failing every action with a dialog.
 - **One window, two panes** — the chat list stays put while the conversation
   beside it changes, and the divider is draggable.
+- **Slide-out menu that closes on tap** — the hamburger opens a menu over a dim
+  scrim; tapping anywhere outside the menu closes it.
 - **Correct threading** — every HTTP call runs on a goroutine and every UI
   mutation goes through `fyne.Do`.
 - **Configurable backend URL** — point the app at any host with
@@ -77,22 +90,26 @@ conversation. The divider is draggable.
 
 ```
 ┌──────────────────────┬────────────────────────────────────────┐
-│ +  Search channels 🎨🗑│  general                    🎨 ⟳      │
+│ FynChat           + ☰│  general                             🎨⟳│
 ├──────────────────────┤  Group                                    │
-│ (G) general      group│  ─────────────────────────────────────  │
-│ (D) design-team channel│              Yesterday                   │
-│ (A) ada          p2p │  (2) User #2            12:00            │
+│ (G) general          │  ─────────────────────────────────────  │
+│ (D) design-team    ▶ │              Yesterday                   │
+│ (A) ada              │  (2) User #2            12:00            │
 │                      │      morning everyone — finally green   │
 │  ← open chat is      │  (3) User #3            09:00            │
 │    filled with the   │      does the channel list still 404?   │
 │    accent colour     │                  no — added yesterday   │
 │                      │  ─────────────────────────────────────  │
-│                      │  [ Message…                       ➤    │
+│                      │  [ Message…                    📎 😊 ➤  │
 └──────────────────────┴────────────────────────────────────────┘
 ```
 
+Tapping **☰** slides out the menu over a dim scrim: the account row, the
+channel search box, Contacts, and Settings. Tapping anywhere outside the menu
+closes it.
+
 Before signing in there is no list to show, so the auth screens take the whole
-window.
+window — a centred card with the logo, the fields and one primary action.
 
 ## Project layout
 
@@ -102,18 +119,25 @@ state-management library, just structs, fields and callbacks.
 | File | Contents |
 | --- | --- |
 | `main.go` | App + window bootstrap, shared `HTTPClient`, view wiring |
-| `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods |
-| `login.go` | `loginView(...)` — email/password form |
+| `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods, avatar bytes |
+| `login.go` | `loginView(...)` + the shared auth card both screens use |
 | `register.go` | `registerView(...)` — name/username/email/password form |
 | `channels.go` | `sidebarView(...)` — the chat list column: search, rows, new channel |
-| `shell.go` | the two-pane window and the pane swap |
-| `chat.go` | `chatView(...)` — header, history as bubbles, composer |
+| `shell.go` | the two-pane window, the menu overlay and the pane swap |
+| `chat.go` | `chatView(...)` — header, history as bubbles, auto-growing composer, emoji picker |
+| `dialog.go` | the new-channel modal: type picker, avatar file selector + live preview, inline errors |
+| `menupanel.go` | the slide-out side menu: account row, search, settings, tap-to-close scrim |
+| `contacts.go` | `contactsView(...)` — list people, add one by username |
+| `ui.go` | shared widgets: avatars (initials or image), link labels, banners, icons |
+| `theme.go` | the Telegram-style palette and the custom Fyne theme |
+| `lottie.go` | lightweight looping animations (spinner, typing dots) via Fyne primitives |
+| `demo.go` | `FYNCHAT_DEMO=1` sample data, served from memory |
 | `httpclient_test.go` | `httptest`-based tests for every HTTP method |
 | `session_test.go` | the session survives a restart and logout clears it |
 | `validate_test.go` | form validation rules |
+| `dialog_test.go` | channel-name and username rules |
+| `ui_test.go` | the async button guard and the side-menu scrim |
 | `shot_test.go` | renders each view to a PNG for review (`make shots`) |
-| `dialog.go` | the new-channel modal: type picker, live avatar preview, inline errors |
-| `demo.go` | `FYNCHAT_DEMO=1` sample data, served from memory |
 | `docs/websockets.md` | Hub / client-pump / broadcast design doc (server-side) |
 
 Navigation is done by passing callbacks. `main.go` owns the transitions:
@@ -228,6 +252,12 @@ Details:
 - Non-2xx responses become Go errors that include the status code and a
   512-byte snippet of the response body, and every error is surfaced with
   `dialog.ShowError` rather than being swallowed.
+- **Channel avatars travel as bytes.** The dialog reads the chosen image file
+  into `[]byte`, and `CreateChannel` sends those bytes under `avatar_url`. On
+  the way back in, `Channel.UnmarshalJSON` accepts `channel_avatar` as either a
+  plain string or base64 (Go's default for `[]byte`), because the backend may
+  return either. A channel with no image just gets `nil` and the UI falls back
+  to an initials circle.
 
 ### Private chats are get-or-create
 
@@ -351,6 +381,7 @@ the place it applies:
 | a row of blank boxes | assigning `Text` without `Refresh()`, so the renderer keeps painting the old text | `Refresh()` after setting text |
 | a search box stretched down the window | `NewBorder`'s left slot is for a side panel, not a top row | search entries go in the top region |
 | nothing painted at all | the canvas walks children by asserting `*fyne.Container`, so a struct embedding one paints nothing | rows hold a plain container (`channelRow`, `contactRow`) |
+| every tap on the sidebar is ignored | a `Stack` hands **every** child the full size, so an invisible `Button` meant to close the menu covered the whole window and swallowed every click | the scrim is a single tappable `scrimWidget` (`menupanel.go`), hidden until the menu opens |
 
 ## Cross-compiling
 
@@ -371,8 +402,10 @@ Scratch output lands in `fyne-cross/tmp/` (git-ignored).
 - [ ] Refresh-token support (`/api/request` in the backend) so long sessions
       do not die on an expired JWT.
 - [x] Persist the token so the app reopens on the channel list.
-- [ ] Message grouping, avatars, timestamps and `channel_type` handling in the
+- [x] Message grouping, avatars, timestamps and `channel_type` handling in the
       channel list.
+- [ ] Backend: attachment upload endpoint, so the attach button can send files.
+- [ ] Unread message tracking and badges in the channel list.
 - [ ] `fynproto` (FCP) transport as the long-term replacement for REST + WS.
 
 ## Contributing

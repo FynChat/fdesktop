@@ -8,7 +8,7 @@ import (
 // The dialog's job is to hand the backend one of the types it accepts, with the
 // values trimmed, and to catch the obvious mistake before sending.
 func TestCleanChannelInput(t *testing.T) {
-	kind, name, avatar, err := cleanChannelInput("group", "  general  ", " https://x/y.png ")
+	kind, name, err := cleanChannelInput("group", "  general  ")
 	if err != nil {
 		t.Fatalf("a valid channel was refused: %v", err)
 	}
@@ -18,20 +18,17 @@ func TestCleanChannelInput(t *testing.T) {
 	if name != "general" {
 		t.Errorf("name = %q, want the trimmed value", name)
 	}
-	if avatar != "https://x/y.png" {
-		t.Errorf("avatar = %q, want the trimmed value", avatar)
-	}
 
-	if _, _, _, err := cleanChannelInput("group", "   ", ""); err == nil {
+	if _, _, err := cleanChannelInput("group", "   "); err == nil {
 		t.Error("an empty name must be refused")
 	}
-	if _, _, _, err := cleanChannelInput("broadcast", "news", ""); err == nil {
+	if _, _, err := cleanChannelInput("broadcast", "news"); err == nil {
 		t.Error("a type the backend does not accept must be refused")
 	}
 
 	// Case and padding on the type are tolerated, since the picker is the
 	// usual route but a caller might build the value another way.
-	if k, _, _, err := cleanChannelInput(" GROUP ", "news", ""); err != nil || k != "group" {
+	if k, _, err := cleanChannelInput(" GROUP ", "news"); err != nil || k != "group" {
 		t.Errorf("cleanChannelInput(GROUP) = %q, %v; want group, nil", k, err)
 	}
 }
@@ -46,7 +43,7 @@ func TestPrivateChatIsNotAChannelTypeHere(t *testing.T) {
 		}
 	}
 
-	if _, _, _, err := cleanChannelInput("p2p", "ada", ""); err == nil {
+	if _, _, err := cleanChannelInput("p2p", "ada"); err == nil {
 		t.Error("p2p must be refused, because a private chat is started from a contact")
 	}
 }

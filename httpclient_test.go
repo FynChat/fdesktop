@@ -166,7 +166,7 @@ func TestListChannelsSendsBearer(t *testing.T) {
 	if len(channels) != 2 {
 		t.Fatalf("got %d channels, want 2", len(channels))
 	}
-	if channels[0].ID != "c1" || channels[0].ChannelName != "general" || channels[0].ChannelAvatar != "g.png" {
+	if channels[0].ID != "c1" || channels[0].ChannelName != "general" || string(channels[0].ChannelAvatar) != "g.png" {
 		t.Errorf("channels[0] = %+v", channels[0])
 	}
 }
@@ -302,11 +302,11 @@ func TestCreateChannel(t *testing.T) {
 		io.WriteString(w, `{"channel_name":"dev","channel_avatar":"d.png"}`)
 	})
 
-	channel, err := c.CreateChannel("text", "dev", "d.png")
+	channel, err := c.CreateChannel("text", "dev", []byte("d.png"))
 	if err != nil {
 		t.Fatalf("CreateChannel: %v", err)
 	}
-	if channel.ChannelName != "dev" || channel.ChannelAvatar != "d.png" {
+	if channel.ChannelName != "dev" || string(channel.ChannelAvatar) != "d.png" {
 		t.Errorf("channel = %+v", channel)
 	}
 }

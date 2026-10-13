@@ -61,7 +61,7 @@ func newChannelRow() *channelRow {
 // update fills the row, paints its selected state and swaps in the badge for
 // the channel's kind.
 func (r *channelRow) update(ch Channel, selected bool) {
-	r.avatarBox.Objects[0] = avatar(initial(ch.ChannelName), 40)
+	r.avatarBox.Objects[0] = avatar(initial(ch.ChannelName), 40, ch.ChannelAvatar)
 	r.avatarBox.Refresh()
 
 	if icon := kindIcon(ch.ChannelType); icon != nil {
@@ -212,8 +212,8 @@ func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(
 	load()
 
 	newChannelBtn := iconButton(theme.ContentAddIcon(), func() {
-		newChannelDialog(w, func(kind, name, avatar string) error {
-			_, err := client.CreateChannel(kind, name, avatar)
+		newChannelDialog(w, func(kind, name string, avatarData []byte) error {
+			_, err := client.CreateChannel(kind, name, avatarData)
 			if err != nil {
 				return err
 			}
