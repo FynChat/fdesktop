@@ -119,7 +119,7 @@ state-management library, just structs, fields and callbacks.
 | File | Contents |
 | --- | --- |
 | `main.go` | App + window bootstrap, shared `HTTPClient`, view wiring |
-| `httpclient.go` | `HTTPClient`, `Channel`, `Message`, the six API methods, avatar bytes |
+| `httpclient.go` | `HTTPClient`, `Channel`, `Message`, every API method, avatar bytes |
 | `login.go` | `loginView(...)` + the shared auth card both screens use |
 | `register.go` | `registerView(...)` — name/username/email/password form |
 | `channels.go` | `sidebarView(...)` — the chat list column: search, rows, new channel |
@@ -181,7 +181,7 @@ sudo pacman -S base-devel pkgconf mesa wayland libxkbcommon libx11 libxcursor li
 </details>
 
 - **A running `fynchat-backend`** (see the repo link above). Without it the app
-  starts but every request fails with a connection error dialog.
+  starts but every request fails with a connection error in the error banner.
 
 ## Demo mode
 
@@ -327,8 +327,9 @@ write path — sending is a normal `POST`, the socket is receive-only. Messages
 are de-duplicated by `Message.ID`, so the message you send is not rendered
 twice when the server echoes it back.
 
-The connection is closed when you press **Back** or close the window. If the
-endpoint is absent the view keeps working over REST — live updates are a
+The connection is torn down when you switch to another channel or close the
+window — the view returns a stop function the shell calls before swapping. If
+the endpoint is absent the view keeps working over REST — live updates are a
 bonus, not the load-bearing path.
 
 **Server side:** `fynchat-backend/internal/realtime` implements the Hub /
@@ -352,7 +353,10 @@ from [Requirements](#requirements) are, because `go test` compiles the whole
 `main` package including the Fyne views.
 
 `dialog_test.go` covers the rules the UI can check without a server: what a
-channel name may be, what counts as a username, and how contacts are searched.
+channel name may be, what counts as a username, how contacts are searched, and
+that the demo server answers the client's routes. `validate_test.go` covers the
+email and login/registration rules. `ui_test.go` covers the async button guard
+and the side-menu scrim (that it starts hidden and closes on a tap).
 
 Expected result:
 
