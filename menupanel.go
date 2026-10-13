@@ -34,7 +34,7 @@ type sideMenu struct {
 	search     *widget.Entry
 }
 
-func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClose func(), onContacts func()) *sideMenu {
+func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClose func(), onContacts, onSettings func()) *sideMenu {
 	name := client.Name
 	if name == "" {
 		name = "Your account"
@@ -90,7 +90,9 @@ func newSideMenu(client *HTTPClient, prefs *Prefs, side sidebar, onLogout, onClo
 		comingSoon("Privacy and security")
 	})
 	settings := newMenuItem(theme.SettingsIcon(), "Settings", "", func() {
-		comingSoon("Settings")
+		if onSettings != nil {
+			onSettings()
+		}
 	})
 	logout := newMenuItem(theme.LogoutIcon(), "Log out", "", func() {
 		client.Logout()

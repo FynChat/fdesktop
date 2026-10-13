@@ -11,9 +11,12 @@ import (
 // pane, so the list stays put — the thing that makes Telegram Desktop feel
 // quick is not going back to a list on every conversation.
 //
-// It returns the window content and the function that opens a chat, so the
-// caller can reopen the last one on launch.
-func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fyne.CanvasObject, func(Channel)) {
+// It returns the window content, the function that opens a chat in its
+// right-hand pane (so the caller can reopen the last one on launch), and a stop
+// function that unregisters the app-wide shortcuts and tears down the open
+// chat. The stop must be called when the shell is replaced — on logout —
+// or a Ctrl+N would still fire into the login form.
+func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fyne.CanvasObject, func(Channel), func()) {
 	// A Stack, not a Center: Center hugs its content, so the chat would sit
 	// in the middle of the pane at its minimum size instead of filling it.
 	content := container.NewStack(emptyChatState())
@@ -75,12 +78,25 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 		}
 	}
 
+	// Settings is a screen, not a dialog: it has a back button and sits in the
+	// left pane the same way Contacts does, so the conversation beside it does
+	// not change under the user.
+	showSettings := func() {
+		pane.Objects = []fyne.CanvasObject{
+			settingsView(client, prefs, w, showChats, onLogout),
+		}
+		pane.Refresh()
+		if menu != nil {
+			menu.showChannelSearch(false)
+		}
+	}
+
 	side = sidebarView(client, prefs, w, onSelect, onLogout, func() {
 		menu.toggle(w.Canvas().Size())
 	})
 	showChats()
 
-	menu = newSideMenu(client, prefs, side, onLogout, nil, showContacts)
+	menu = newSideMenu(client, prefs, side, onLogout, nil, showContacts, showSettings)
 
 	// A draggable split, like the divider in Telegram Desktop: the list keeps
 	// roughly a third of the window and both sides can be resized.
@@ -96,12 +112,51 @@ func shell(client *HTTPClient, prefs *Prefs, w fyne.Window, onLogout func()) (fy
 	overlay := container.NewStack(split)
 	overlay.Objects = append(overlay.Objects, menu.scrim, holder)
 
+	// The app-wide shortcuts. Ctrl+Enter belongs to the composer and is bound
+	// in chatView, because it only means anything while a chat is open; these
+	// four mean the same thing wherever you are in the shell.
+	//
+	// Each is registered on the window canvas and unregistered by the returned
+	// stop, so logging out does not leave a shortcut firing into a login form.
+	var bound []fyne.Shortcut
+	bind := func(def shortcutDef, handler func(fyne.Shortcut)) {
+		sc := def.shortcut()
+		w.Canvas().AddShortcut(sc, handler)
+		bound = append(bound, sc)
+	}
+
+	bind(newChannelShortcut, func(fyne.Shortcut) {
+		if side.newChannel != nil {
+			side.newChannel()
+		}
+	})
+
+	// Ctrl+F opens the menu and lands in the search box, which lives inside
+	// the menu rather than the list header. Focus goes through the canvas:
+	// an Entry has no Focus method of its own.
+	bind(focusSearchShortcut, func(fyne.Shortcut) {
+		if !menu.open {
+			menu.toggle(w.Canvas().Size())
+		}
+		w.Canvas().Focus(side.search)
+	})
+
+	bind(openSettingsShortcut, func(fyne.Shortcut) { showSettings() })
+	bind(helpShortcut, func(fyne.Shortcut) { showShortcutsDialog(w) })
+
+	stopShell := func() {
+		for _, sc := range bound {
+			w.Canvas().RemoveShortcut(sc)
+		}
+		stopChat()
+	}
+
 	// Opening a chat from anywhere else, such as restoring the last one on
 	// launch, still marks the row.
 	return overlay, func(ch Channel) {
 		side.markOpen(ch)
 		openChat(ch)
-	}
+	}, stopShell
 }
 
 // emptyChatState is what the right pane shows before a chat is picked.

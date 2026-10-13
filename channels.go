@@ -101,9 +101,10 @@ func (r *channelRow) update(ch Channel, selected bool) {
 // into the app: a way to highlight a row it opened by itself, and the search
 // entry, which now lives in the side menu rather than the header.
 type sidebar struct {
-	view     fyne.CanvasObject
-	markOpen func(Channel)
-	search   *widget.Entry
+	view       fyne.CanvasObject
+	markOpen   func(Channel)
+	search     *widget.Entry
+	newChannel func()
 }
 
 // sidebarView is the left column: the app name with the menu button in the
@@ -225,6 +226,12 @@ func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(
 	// The header is the app name and one button. Everything else — new
 	// channel, theme, log out, search — lives in the menu that slides out
 	// from it, which is where Telegram keeps them too.
+	//
+	// newChannel is exposed as well as wired to the button, so the Ctrl+N
+	// shortcut can open the same dialog without the shell having to know how
+	// the dialog is built.
+	newChannel := func() { newChannelBtn.OnTapped() }
+
 	appName := canvas.NewText("FynChat", theme.ForegroundColor())
 	appName.TextStyle = fyne.TextStyle{Bold: true}
 	appName.TextSize = theme.Size(theme.SizeNameSubHeadingText)
@@ -238,5 +245,5 @@ func sidebarView(client *HTTPClient, prefs *Prefs, w fyne.Window, onSelect func(
 	// take all the space the header leaves, however tall the window is.
 	view := container.NewBorder(header, banner.wrap, nil, nil, body)
 
-	return sidebar{view: view, markOpen: markOpen, search: search}
+	return sidebar{view: view, markOpen: markOpen, search: search, newChannel: newChannel}
 }

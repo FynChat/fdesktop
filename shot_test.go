@@ -20,8 +20,10 @@ import (
 	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/test"
-	"fyne.io/fyne/v2/widget"
+	"fyne.io/fyne/v2/theme"
 )
 
 func fakeBackend() *httptest.Server {
@@ -128,8 +130,35 @@ func TestRenderViews(t *testing.T) {
 	// first string measurement can crash inside walkString on a cold cache,
 	// which has nothing to do with the view being captured and everything to
 	// do with this being the process's first text.
-	warm := test.NewWindow(widget.NewLabel("FynChat"))
-	warm.Resize(fyne.NewSize(300, 100))
+	//
+	// One label is not enough: each weight, style and size is a different
+	// font/size pair, and shaping a pair for the first time is what crashes
+	// (harfbuzz GPOS pair positioning). So the warm-up renders the
+	// combinations the views actually use — regular, bold and italic at the
+	// caption, text, sub-heading and heading sizes, with the punctuation that
+	// appears in the real strings.
+	warmStyles := []struct {
+		style fyne.TextStyle
+		size  float32
+	}{
+		{fyne.TextStyle{}, theme.Size(theme.SizeNameText)},
+		{fyne.TextStyle{Bold: true}, theme.Size(theme.SizeNameText)},
+		{fyne.TextStyle{Italic: true}, theme.Size(theme.SizeNameText)},
+		{fyne.TextStyle{}, theme.Size(theme.SizeNameCaptionText)},
+		{fyne.TextStyle{Bold: true}, theme.Size(theme.SizeNameCaptionText)},
+		{fyne.TextStyle{}, theme.Size(theme.SizeNameSubHeadingText)},
+		{fyne.TextStyle{Bold: true}, theme.Size(theme.SizeNameSubHeadingText)},
+		{fyne.TextStyle{Bold: true}, theme.Size(theme.SizeNameHeadingText)},
+	}
+	warmRows := make([]fyne.CanvasObject, 0, len(warmStyles))
+	for _, s := range warmStyles {
+		t := canvas.NewText("FynChat — Ctrl + Enter, “quotes” & apostrophe's", theme.ForegroundColor())
+		t.TextStyle = s.style
+		t.TextSize = s.size
+		warmRows = append(warmRows, t)
+	}
+	warm := test.NewWindow(container.NewVBox(warmRows...))
+	warm.Resize(fyne.NewSize(700, 400))
 	warm.Canvas().Capture()
 	warm.Close()
 
@@ -146,7 +175,7 @@ func TestRenderViews(t *testing.T) {
 
 	// The shell with nothing open yet, and with a chat open. One window for
 	// both: the same content object cannot be shown in a second window.
-	layout, openChat := shell(client, prefs, w, func() {})
+	layout, openChat, _ := shell(client, prefs, w, func() {})
 
 	shellWin := test.NewWindow(layout)
 	shellWin.Resize(fyne.NewSize(1000, 680))
@@ -199,6 +228,21 @@ func TestRenderViews(t *testing.T) {
 	contactsWin.Resize(fyne.NewSize(420, 680))
 	waitForRequests(t, 3)
 	snapIn(t, contactsWin, "shot-contacts.png")
+
+	// Settings and the shortcuts dialog, in their own windows like the rest.
+	// The dialog needs a window of its own too: showing it on the harness's
+	// unresized w renders it at the default size, which crams the rows
+	// together.
+	settingsWin := test.NewWindow(settingsView(client, prefs, w, func() {}, func() {}))
+	defer settingsWin.Close()
+	settingsWin.Resize(fyne.NewSize(420, 680))
+	snapIn(t, settingsWin, "shot-settings.png")
+
+	shortcutsWin := test.NewWindow(nil)
+	defer shortcutsWin.Close()
+	shortcutsWin.Resize(fyne.NewSize(480, 420))
+	showShortcutsDialog(shortcutsWin)
+	snapIn(t, shortcutsWin, "shot-shortcuts.png")
 }
 
 // snapIn writes a window's canvas to a PNG.

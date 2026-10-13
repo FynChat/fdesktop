@@ -232,6 +232,13 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 
 	sending.OnTapped = send
 
+	// Ctrl+Enter sends, the same keys Telegram Desktop uses. It is bound here
+	// rather than through OnSubmitted because Fyne's MultiLineEntry fires that
+	// on Shift+Enter only — plain Enter is a newline, which is what a composer
+	// should do, so the send needs its own shortcut.
+	sendKeys := sendMessageShortcut.shortcut()
+	w.Canvas().AddShortcut(sendKeys, func(fyne.Shortcut) { send() })
+
 	// Telegram puts the avatar, then the channel name on one line with a quieter
 	// summary under it, and the actions on the right.
 	title := canvas.NewText(channelName, theme.ForegroundColor())
@@ -281,7 +288,16 @@ func chatView(client *HTTPClient, prefs *Prefs, w fyne.Window, channelID, channe
 		container.NewPadded(entry))
 	composer := container.NewVBox(separator, composerInput, banner.wrap)
 
-	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll)), cancelWS
+	// The returned stop tears down everything the view owns: the WebSocket and
+	// the Ctrl+Enter binding. Without the second half, switching channels would
+	// leave the old composer's send shortcut firing into a view nobody is
+	// looking at any more.
+	stop := func() {
+		cancelWS()
+		w.Canvas().RemoveShortcut(sendKeys)
+	}
+
+	return container.NewBorder(header, composer, nil, nil, container.NewPadded(scroll)), stop
 }
 
 // channelTypeLabel turns the raw type into the sentence Telegram shows under

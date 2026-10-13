@@ -37,19 +37,27 @@ func main() {
 	// Declared before the handlers below, which close over them.
 	var showLogin, showRegister func()
 
+	// stopShell tears the shell down — its shortcuts and the open chat's
+	// WebSocket. It is replaced every time a new shell is built, and called
+	// before the login form takes over, so a Ctrl+N cannot fire into it.
+	var stopShell = func() {}
+
 	// home swaps the whole window for the two-pane shell and returns the
 	// function that opens a chat in its right-hand pane.
 	var home func() func(Channel)
 	home = func() func(Channel) {
-		layout, openChat := shell(client, prefs, w, showLogin)
+		layout, openChat, stop := shell(client, prefs, w, showLogin)
+		stopShell = stop
 		w.SetContent(layout)
 		return openChat
 	}
 
 	showLogin = func() {
+		stopShell()
 		w.SetContent(loginView(client, w, func() { home() }, showRegister))
 	}
 	showRegister = func() {
+		stopShell()
 		w.SetContent(registerView(client, w, func() { home() }, showLogin))
 	}
 
