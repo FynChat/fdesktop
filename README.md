@@ -270,7 +270,7 @@ backend's. The client sends the handle with any leading `@` already stripped.
 | `GET /api/channels/:id/messages` | ✅ implemented | – |
 | `POST /api/message/create/:channel_id` | ✅ implemented | – |
 | `ws://…/ws` | ✅ implemented | `internal/realtime` — see [`docs/websockets.md`](docs/websockets.md) |
-| `GET /api/contacts` | ❌ missing | return the user's contacts |
+| `GET /api/contacts` | ✅ implemented | return the user's contacts |
 | `POST /api/contacts` `{username}` | ❌ missing | resolve the handle, reject unknown users and duplicates |
 | p2p `POST /api/channel/create` | ❌ missing | accept `peer_id`, make it get-or-create per pair |
 | Port | ⚠️ `SERVER_PORT` defaults to `8000` | run with `FYNCHAT_API_URL=http://localhost:8000` |
