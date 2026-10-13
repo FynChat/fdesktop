@@ -67,6 +67,10 @@ FCP lands — see [Roadmap](#roadmap).
   beside it changes, and the divider is draggable.
 - **Slide-out menu that closes on tap** — the hamburger opens a menu over a dim
   scrim; tapping anywhere outside the menu closes it.
+- **Settings screen** — account, a dark-theme switch, the server URL and the
+  keyboard shortcuts, with log out. Reachable from the menu or Ctrl + ,.
+- **Keyboard shortcuts** — Ctrl + Enter sends, Ctrl + N makes a channel,
+  Ctrl + F searches, Ctrl + , opens settings and Ctrl + / lists them all.
 - **Correct threading** — every HTTP call runs on a goroutine and every UI
   mutation goes through `fyne.Do`.
 - **Configurable backend URL** — point the app at any host with
@@ -111,6 +115,26 @@ closes it.
 Before signing in there is no list to show, so the auth screens take the whole
 window — a centred card with the logo, the fields and one primary action.
 
+## Keyboard shortcuts
+
+Enter on its own starts a new line in the composer — Fyne's `MultiLineEntry`
+treats plain Enter as a newline and only fires `OnSubmitted` on Shift+Enter —
+so sending is bound to Ctrl+Enter by hand, the same keys Telegram Desktop uses.
+
+| Shortcut | Does |
+| --- | --- |
+| `Ctrl + Enter` | Send the message you have typed |
+| `Ctrl + N` | Create a new channel |
+| `Ctrl + F` | Open the menu and search your channels |
+| `Ctrl + ,` | Open settings |
+| `Ctrl + /` | List every shortcut |
+
+The list lives in `shortcuts.go` and backs both the registration and the
+Ctrl+/ dialog, so the two cannot drift apart. The four app-wide shortcuts are
+registered by `shell.go` and unregistered by its stop function on logout, so a
+Ctrl+N cannot fire into the login form. Ctrl+Enter belongs to the composer and
+is bound in `chatView`, which removes it when the chat is swapped.
+
 ## Project layout
 
 One file per view, as the project convention dictates — no framework, no
@@ -127,6 +151,8 @@ state-management library, just structs, fields and callbacks.
 | `chat.go` | `chatView(...)` — header, history as bubbles, auto-growing composer, emoji picker |
 | `dialog.go` | the new-channel modal: type picker, avatar file selector + live preview, inline errors |
 | `menupanel.go` | the slide-out side menu: account row, search, settings, tap-to-close scrim |
+| `settings.go` | `settingsView(...)` — account, theme switch, server, shortcuts, log out |
+| `shortcuts.go` | the keyboard shortcuts and the dialog that lists them |
 | `contacts.go` | `contactsView(...)` — list people, add one by username |
 | `ui.go` | shared widgets: avatars (initials or image), link labels, banners, icons |
 | `theme.go` | the Telegram-style palette and the custom Fyne theme |
