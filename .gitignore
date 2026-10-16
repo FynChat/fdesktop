@@ -1,22 +1,38 @@
-# Build output
-/fynchat
-/fynchat.exe
-/dist/
-/build/
-*.exe
+# Build outputs
+build/
+build_*/
+CMakeCache.txt
+CMakeFiles/
+*.o
+*.so
+*.a
+*.deb
+*.bin
 
-# Cross-compilation scratch dirs (fyne-cross, WSLg symlink helper)
-/fyne-cross/tmp/
-/wslg-links/
+# Qt / CMake generated
+*.qmake.stash
+qmake_*.conf
+Makefile
+*.pro.user
 
-# Go test output
-*.test
-*.out
-
-# Editors / OS
-.idea/
+# IDE
 .vscode/
-.DS_Store
+.idea/
 *.swp
-# Screenshot harness output
-shot-*.png
+*~
+
+# Docker
+Dockerfile.centos
+docker-compose.centos.yml
+
+# Generated / misc
+versions.txt
+test_ui_build.sh
+fynchat-desktop_*.deb
+
+include/*
+CMakeLists.txt
+
+# Docs
+docs/*
+.dockerignore

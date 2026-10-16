@@ -1,0 +1,33 @@
+fdesktop Changelog
+
+2026-10-15 - Initial Qt skeleton
+- Added include/shared/protocol.hpp with FcpHeader and CommandType enum
+- Added src/fynclient.hpp/cpp with QTcpSocket wrapper, sendCommand, onReadyRead buffer
+- Added src/mainwindow.hpp/cpp with basic QMainWindow layout: sidebar, chat history, input area
+- Added src/main.cpp app entry showing MainWindow and creating FynClient to 127.0.0.1:8080
+- Added CMakeLists.txt for Qt6 Core Network Widgets
+- Added README.md
+
+2026-10-15 - Bug fixes from code review
+- fynclient.hpp: added #include <QAbstractSocket>
+- fynclient.cpp: sendCommand now uses QDataStream with BigEndian, overflow check, no flush, partial write warn
+- fynclient.cpp: onReadyRead now validates packet length, max packet 4MB, big endian parsing via QDataStream, no reinterpret_cast
+- fynclient.cpp: onDisconnected clears readBuffer
+- main.cpp: connectedChanged now triggers FetchHistory, messageReceived connected for logging
+
+2026-10-15 - Versioning and UI metadata
+- App version set to 0.1.0 in CMakeLists.txt and versions.txt
+- MainWindow title updated to "FynChat Desktop v0.1.0"
+- Added Help -> About menu showing version and Qt info
+- CMakeLists now defines PROJECT_VERSION
+
+Current running state:
+- Application builds structure for Qt desktop frontend
+- FynClient can connect to FynChat server and send FCP packets with proper byte order and safety checks
+- MainWindow shows dark themed shell with placeholder chat UI
+- Basic client->UI signal wiring added
+
+Known issues remaining:
+- UI not fully wired to display messages
+- No QSS theming fully applied
+- Missing emoji picker / file attach
