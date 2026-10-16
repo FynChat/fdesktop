@@ -2,68 +2,77 @@
 
 ![fdesktop logo](resources/logo.png)
 
-A Qt 6 desktop client for FynChat built around the custom FCP binary protocol. The UI is inspired by modern messenger apps — clean two-pane layout, collapsible navigation tray, bubble chat with Catppuccin Mocha theming, and a responsive composer.
+A Qt 6 desktop client for FynChat, built around the custom FCP binary protocol. The UI follows modern messenger conventions: a two-pane layout with a collapsible icon tray, bubble-style chat history, and a Catppuccin Mocha dark theme.
 
-> Development is currently on branch `feat/ui-overhaul-avatars-auth`. Read the docs from that branch for the latest UI spec.
-
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Qt](https://img.shields.io/badge/Qt-6-green.svg)](https://qt.io)
+[![Version](https://img.shields.io/badge/version-0.2.0-89b4fa)](#build)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Debian%20%7C%20Ubuntu%20%C2%B7%20amd64-11111b)](#build)
+[![Qt](https://img.shields.io/badge/Qt-6.6-green.svg)](https://doc.qt.io/qt-6/)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ## Overview
 
-fdesktop connects to a FynChat server via TCP and implements the shared FCP protocol defined in `include/shared/protocol.hpp`. The client provides:
+fdesktop connects to a FynChat server over TCP and speaks the shared FCP protocol
+defined in `include/shared/protocol.hpp`. It provides:
 
-* Two-pane Telegram-style layout with a collapsible icon tray and chat sidebar
-* Bubble message view with user / incoming color coding
-* Card-style login / register dialog with validation and busy states
-* Catppuccin Mocha dark theme with QSS styling, rounded corners, and hover states
-* Protocol layer shared with fynproto for consistent serialization
+* Two-pane layout with an icon tray and a collapsible chat sidebar
+* Bubble message view with separate colours for incoming and outgoing messages
+* Card-style login / register dialog that waits for the server's answer
+* Catppuccin Mocha theme applied through Qt Style Sheets
+* Strict packet parsing: bounded buffers, size limits, no unbounded allocations
 
 Current components:
 
-* `include/shared/protocol.hpp` — `FcpHeader` + `CommandType` enum, little-endian framing
-* `src/fynclient.{hpp,cpp}` — `QTcpSocket` wrapper with bounded allocation and `MAX_PACKET` guard
-* `src/mainwindow_improved.{hpp,cpp}` / `src/logindialog_improved.{hpp,cpp}` — improved UI per `docs/Main.md`
-* `src/main.cpp` — app entry, defaults to `127.0.0.1:8080`
+* `src/mainwindow.{hpp,cpp}` — main window: icon tray, sidebar, chat header, message history, composer
+* `src/logindialog.{hpp,cpp}` — login / register dialog
+* `src/fynclient.{hpp,cpp}` — `QTcpSocket` wrapper, framing and packet dispatch
+* `src/main.cpp` — entry point, wires the client signals to the UI
+* `include/shared/protocol.hpp` — `FcpHeader` and the `CommandType` catalogue
 
 ## Screenshots
 
 *UI preview coming soon. The design spec is in `docs/Main.md`.*
 
-## Supported systems
-
-Designed for Linux desktops. Builds tested on:
-
-* GNU/Linux x86_64 with Qt 6
-* Docker build for CentOS via `docker-compose.centos.yml`
-
-Binary packages may be added later for Windows and macOS.
-
 ## Build
 
-Requirements:
+fdesktop is built and packaged on Debian-based Linux distributions, 64-bit.
 
-* CMake ≥ 3.16
-* Qt 6 Core, Network, Widgets
-* C++17 compiler
+### Requirements
+
+* Debian 12 / Ubuntu 22.04 or newer (amd64)
+* CMake ≥ 3.16 and a C++17 compiler
+* Qt 6 (Core, Network, Widgets)
+
+### Install the dependencies
 
 ```bash
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release ..
-cmake --build .
+sudo apt update
+sudo apt install build-essential cmake qt6-base-dev
 ```
 
-Run:
+### Compile
 
 ```bash
-./fdesktop
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
 ```
 
-Docker build:
+### Run
 
 ```bash
-docker compose -f docker-compose.centos.yml build
+./build/fdesktop
+```
+
+The client connects to `127.0.0.1:8080` on startup and opens the login dialog.
+
+### Debian package
+
+Release builds are packaged as `fynchat-desktop_<version>_amd64.deb`. The package
+depends on the Qt 6 runtime libraries (`libqt6core6`, `libqt6widgets6`,
+`libqt6network6`), which `apt` resolves automatically:
+
+```bash
+sudo apt install ./fynchat-desktop_0.2.0_amd64.deb
 ```
 
 ## UI Design
@@ -72,40 +81,41 @@ Design spec: `docs/Main.md`
 
 Palette — Catppuccin Mocha:
 
-* Background `#1e1e2e`, Surface `#11111b`
-* Accent `#89b4fa`, User bubble `#cba6f7`, Incoming `#313244`
+* Background `#1e1e2e`, surface `#11111b`
+* Accent `#89b4fa`, outgoing bubble `#cba6f7`, incoming bubble `#313244`
 * Text primary `#cdd6f4`, secondary `#6c7086`
 
-Layout: left icon tray → collapsible chat sidebar → dynamic header → message area → input bar with emoji / attach / send.
+Layout: icon tray → collapsible chat sidebar → dynamic header → message area →
+input bar with emoji, attach and send controls.
 
 ## Documentation
 
 * `docs/FCP.md` — FCP protocol overview
-* `docs/Main.md` — UI design & architecture spec
-* `docs/Protocol_Integration.md` — fcproto-aligned notes
+* `docs/Main.md` — UI design and architecture spec
+* `docs/Protocol_Integration.md` — protocol alignment and integration notes
+* `changelog.txt` — release history
 
 ## Third-party
 
 * Qt 6 — LGPL
-* OpenSSL — Apache 2.0, used indirectly via Qt Network
-* Catppuccin color palette — MIT
+* OpenSSL — Apache 2.0, used through Qt Network
+* Catppuccin colour palette — MIT
 
-## Known issues / TODO
+## Known limitations
 
-* Auth dialog closes on send without waiting for server ack; `authSucceeded` signal is declared but unused
-* Credentials sent in clear text over TCP; TLS and hashing needed for production
-* Avatar upload has no size limit before base64 allocation
-* Packet parsing duplicated between `FynClient` and `main.cpp`; emit parsed `CommandType` + payload
-* `include/` should be versioned, not git-ignored
-* Add reconnect logic, error surfacing, and bounded input
+* The server address is fixed at `127.0.0.1:8080`; there is no settings screen yet
+* Connections are plain TCP — credentials are not protected by TLS
+* No automatic reconnection: restart the client if the server goes away
+* The emoji button is a placeholder and does nothing yet
+* Avatar uploads are capped at 5 MB
 
 ## Contributing
 
-* Keep serialization single-source-of-truth. Avoid `#pragma pack` reliance across compilers.
-* Use Qt parent-child ownership; avoid raw owning pointers.
-* Add `-Wall -Wextra -Wpedantic` to CMake and treat warnings as errors in CI.
-* Run `test_ui_build.sh` before opening PRs.
+* Keep serialization in one place; avoid relying on `#pragma pack` across compilers
+* Use Qt parent-child ownership instead of raw owning pointers
+* Build with `-Wall -Wextra -Wpedantic` and keep the build warning-free
+* Describe the change and the version impact in `changelog.txt`
 
 ## License
 
-See repository policy. The project is intended to be released under GPLv3 with OpenSSL exception, matching the FynChat ecosystem.
+Released under the [MIT License](LICENSE).
