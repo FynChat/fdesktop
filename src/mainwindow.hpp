@@ -5,11 +5,14 @@
 class QVBoxLayout;
 class QHBoxLayout;
 class QListWidget;
-class QTextEdit;
+class QTextBrowser;
 class QPushButton;
 class QLabel;
 class QLineEdit;
+class QTextEdit;
 class QSplitter;
+class QToolButton;
+class QFrame;
 
 class FynClient;
 
@@ -30,20 +33,24 @@ private:
     void styleWidgets();
     void setupMenu();
     void showAuthDialog();
+    void toggleSidebar();
 
     FynClient *m_client;
     bool m_loggedIn;
 
+    QWidget *iconTray;
     QWidget *sidebar;
     QWidget *chatPane;
     QListWidget *chatList;
     QLineEdit *searchBar;
     QLabel *avatarLabel;
     QLabel *chatHeader;
-    QListWidget *chatHistory;
+    QTextBrowser *chatHistory;
     QTextEdit *inputArea;
     QPushButton *sendButton;
-    QPushButton *emojiButton;
-    QPushButton *attachButton;
+    QToolButton *emojiButton;
+    QToolButton *attachButton;
+    QPushButton *toggleSidebarBtn;
     QSplitter *splitter;
+    bool sidebarExpanded;
 };

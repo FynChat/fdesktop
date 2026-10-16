@@ -6,7 +6,6 @@ class QPushButton;
 class QLabel;
 class QVBoxLayout;
 class QHBoxLayout;
-
 class FynClient;
 
 class LoginDialog : public QDialog {

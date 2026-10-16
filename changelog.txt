@@ -1,5 +1,20 @@
 fdesktop Changelog
 
+2026-10-16 - v0.2.0 - UI overhaul
+- Replaced the two-pane list view with an icon tray, a collapsible chat
+  sidebar (toggle from the tray) and a QTextBrowser bubble history
+- Login dialog rewritten as a centred card with validation and a
+  "wait for the server" auth flow instead of closing on send
+- Avatar upload now rejects files above 5 MB before reading them
+- Version bumped to 0.2.0 in the window title and the About box
+- Dropped the _improved suffix: src/mainwindow and src/logindialog now
+  hold the current UI, the old implementations are gone
+- Register sends the username only, as documented in
+  docs/Protocol_Integration.md
+- README rewritten for public readers: logo, badges, Debian build
+  instructions and current limitations
+- Restored the MIT LICENSE
+
 2026-10-15 - Initial Qt skeleton
 - Added include/shared/protocol.hpp with FcpHeader and CommandType enum
 - Added src/fynclient.hpp/cpp with QTcpSocket wrapper, sendCommand, onReadyRead buffer

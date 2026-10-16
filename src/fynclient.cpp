@@ -100,7 +100,7 @@ void FynClient::onReadyRead()
     }
 }
 
-void FynClient::onError(QAbstractSocket::SocketError socketError)
+void FynClient::onError(QAbstractSocket::SocketError)
 {
     QString msg = socket->errorString();
     qDebug() << "[Client] Socket error:" << msg;
