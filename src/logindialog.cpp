@@ -1,100 +1,128 @@
 #include "logindialog.hpp"
 #include "fynclient.hpp"
 #include "shared/protocol.hpp"
-#include <QVBoxLayout>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPushButton>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QVBoxLayout>
 
 LoginDialog::LoginDialog(FynClient *client, QWidget *parent)
-    : QDialog(parent), m_client(client)
-{
-    setWindowTitle("FynChat Login");
-    setModal(true);
-    resize(360, 280);
-    setupUI();
-    applyTheme();
+    : QDialog(parent), m_client(client) {
+  setWindowTitle("FynChat Login");
+  setModal(true);
+  resize(400, 360);
+  setupUI();
+  applyTheme();
 }
 
-void LoginDialog::setupUI()
-{
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->setContentsMargins(24, 24, 24, 24);
-    layout->setSpacing(12);
+void LoginDialog::setupUI() {
+  QVBoxLayout *mainLayout = new QVBoxLayout(this);
+  mainLayout->setContentsMargins(0, 0, 0, 0);
+  mainLayout->setSpacing(0);
 
-    QLabel *title = new QLabel("Welcome to FynChat");
-    title->setObjectName("dialogTitle");
-    title->setAlignment(Qt::AlignCenter);
+  // Card container
+  QFrame *card = new QFrame();
+  card->setObjectName("card");
+  QVBoxLayout *layout = new QVBoxLayout(card);
+  layout->setContentsMargins(32, 32, 32, 32);
+  layout->setSpacing(16);
 
-    m_usernameEdit = new QLineEdit();
-    m_usernameEdit->setPlaceholderText("Username");
+  QLabel *title = new QLabel("Welcome to FynChat");
+  title->setObjectName("dialogTitle");
+  title->setAlignment(Qt::AlignCenter);
 
-    m_passwordEdit = new QLineEdit();
-    m_passwordEdit->setPlaceholderText("Password");
-    m_passwordEdit->setEchoMode(QLineEdit::Password);
+  QLabel *subtitle = new QLabel("Sign in to continue");
+  subtitle->setAlignment(Qt::AlignCenter);
+  subtitle->setStyleSheet("color:#6c7086;");
 
-    QHBoxLayout *buttonLayout = new QHBoxLayout();
-    m_registerButton = new QPushButton("Register");
-    m_loginButton = new QPushButton("Login");
-    buttonLayout->addWidget(m_registerButton);
-    buttonLayout->addWidget(m_loginButton);
+  m_usernameEdit = new QLineEdit();
+  m_usernameEdit->setPlaceholderText("Username");
+  m_usernameEdit->setClearButtonEnabled(true);
 
-    layout->addWidget(title);
-    layout->addWidget(m_usernameEdit);
-    layout->addWidget(m_passwordEdit);
-    layout->addStretch();
-    layout->addLayout(buttonLayout);
+  m_passwordEdit = new QLineEdit();
+  m_passwordEdit->setPlaceholderText("Password");
+  m_passwordEdit->setEchoMode(QLineEdit::Password);
+  m_passwordEdit->setClearButtonEnabled(true);
 
-    connect(m_loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
-    connect(m_registerButton, &QPushButton::clicked, this, &LoginDialog::onRegisterClicked);
+  QHBoxLayout *buttonLayout = new QHBoxLayout();
+  m_registerButton = new QPushButton("Register");
+  m_loginButton = new QPushButton("Login");
+  m_loginButton->setDefault(true);
+  buttonLayout->addWidget(m_registerButton);
+  buttonLayout->addWidget(m_loginButton);
+
+  layout->addWidget(title);
+  layout->addWidget(subtitle);
+  layout->addSpacing(8);
+  layout->addWidget(m_usernameEdit);
+  layout->addWidget(m_passwordEdit);
+  layout->addSpacing(12);
+  layout->addLayout(buttonLayout);
+
+  mainLayout->addWidget(card);
+
+  connect(m_loginButton, &QPushButton::clicked, this,
+          &LoginDialog::onLoginClicked);
+  connect(m_registerButton, &QPushButton::clicked, this,
+          &LoginDialog::onRegisterClicked);
 }
 
-void LoginDialog::applyTheme()
-{
-    m_registerButton->setObjectName("registerButton");
-    setStyleSheet(
-        "QDialog { background:#1e1e2e; color:#cdd6f4; }"
-        "#dialogTitle { font-size:18px; font-weight:600; margin-bottom:8px; }"
-        "QLineEdit { background:#11111b; color:#cdd6f4; border:1px solid #313244; border-radius:6px; padding:8px; }"
-        "QPushButton { background:#89b4fa; color:#1e1e2e; border:none; border-radius:6px; padding:8px 16px; font-weight:600; }"
-        "QPushButton:hover { background:#74c7ec; }"
-        "QPushButton#registerButton { background:#fab387; }"
-    );
+void LoginDialog::applyTheme() {
+  setStyleSheet(
+      "QDialog { background:#1e1e2e; }"
+      "#card { background:#11111b; border:1px solid #313244; "
+      "border-radius:16px; }"
+      "#dialogTitle { font-size:20px; font-weight:700; margin-bottom:4px; "
+      "color:#cdd6f4; }"
+      "QLineEdit { background:#1e1e2e; color:#cdd6f4; border:1px solid "
+      "#313244; border-radius:8px; padding:10px; font-size:14px; }"
+      "QLineEdit:focus { border:1px solid #89b4fa; }"
+      "QPushButton { background:#89b4fa; color:#1e1e2e; border:none; "
+      "border-radius:8px; padding:10px 20px; font-weight:600; font-size:14px; }"
+      "QPushButton:hover { background:#74c7ec; }"
+      "QPushButton#registerBtn, QPushButton { }"
+      "QPushButton[objectName=\"registerButton\"] { background:#fab387; "
+      "color:#1e1e2e; }"
+      "QPushButton[objectName=\"registerButton\"]:hover { background:#f5c2e7; "
+      "}");
+  m_registerButton->setObjectName("registerButton");
 }
 
-void LoginDialog::onLoginClicked()
-{
-    QString username = m_usernameEdit->text().trimmed();
-    QString password = m_passwordEdit->text();
+void LoginDialog::onLoginClicked() {
+  QString username = m_usernameEdit->text().trimmed();
+  QString password = m_passwordEdit->text();
 
-    if (username.isEmpty() || password.isEmpty()) {
-        QMessageBox::warning(this, "Input required", "Username and password are required.");
-        return;
-    }
+  if (username.isEmpty() || password.isEmpty()) {
+    QMessageBox::warning(this, "Input required",
+                         "Username and password are required.");
+    return;
+  }
 
-    if (m_client) {
-        m_client->sendCommand(CommandType::Login, username + ":" + password);
-    } else {
-        QMessageBox::warning(this, "Error", "No client available");
-    }
-    // Do not accept here – wait for server response
+  if (m_client) {
+    m_client->sendCommand(CommandType::Login, username + ":" + password);
+  } else {
+    QMessageBox::warning(this, "Error", "No client available");
+  }
+  // Wait for server response before closing
 }
 
-void LoginDialog::onRegisterClicked()
-{
-    QString username = m_usernameEdit->text().trimmed();
+void LoginDialog::onRegisterClicked() {
+  QString username = m_usernameEdit->text().trimmed();
 
-    if (username.isEmpty()) {
-        QMessageBox::warning(this, "Input required", "Username is required to register.");
-        return;
-    }
+  if (username.isEmpty()) {
+    QMessageBox::warning(this, "Input required",
+                         "Username is required to register.");
+    return;
+  }
 
-    if (m_client) {
-        m_client->sendCommand(CommandType::Register, username);
-    } else {
-        QMessageBox::warning(this, "Error", "No client available");
-    }
-    // Do not accept here – wait for server response
+  if (m_client) {
+    // The Register command carries the username only (docs/Protocol_Integration.md).
+    m_client->sendCommand(CommandType::Register, username);
+  } else {
+    QMessageBox::warning(this, "Error", "No client available");
+  }
+  // Wait for server response before closing
 }
